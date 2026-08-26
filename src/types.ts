@@ -55,6 +55,8 @@ export interface RequisitionItem {
   unitCost: number;
   targetTab?: string;
   allocatedLocation?: string;
+  category?: string;
+  notes?: string;
 }
 
 export type RequisitionStatus = 'draft' | 'pending' | 'approved' | 'ordered' | 'received' | 'rejected';
@@ -65,6 +67,7 @@ export interface Requisition {
   createdBy: string;
   createdByName: string;
   createdAt: string;
+  lastUpdated?: string;
   items: RequisitionItem[];
   purpose: string;
   requestingDept?: string;
@@ -74,6 +77,7 @@ export interface Requisition {
   totalCost: number;
   notes?: string;
   quotations?: string[];
+  quotationVendor?: string;
   approvedBy?: string;
   approvedByName?: string;
   approvedAt?: string;

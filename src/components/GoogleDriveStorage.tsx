@@ -95,7 +95,7 @@ export function GoogleDriveStorage({
   const [files, setFiles] = useState<DriveFileItem[]>([]);
   const [isLoadingFiles, setIsLoadingFiles] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterType, setFilterType] = useState<'all' | 'backup' | 'pdf' | 'image' | 'sheet'>('all');
+  const [filterType, setFilterType] = useState<'all' | 'folder' | 'backup' | 'pdf' | 'image' | 'sheet'>('all');
   const [viewLayout, setViewLayout] = useState<'grid' | 'table'>('grid');
 
   // Operation feedback states
