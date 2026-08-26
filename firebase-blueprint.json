@@ -1,0 +1,262 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User account information and roles",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "username": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "managing_director", "staff", "rooms_event_officer", "purchaser"] },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "department": { "type": "string" },
+        "shift": { "type": "string" },
+        "joinedDate": { "type": "string" },
+        "emergencyContact": { "type": "string" },
+        "password": { "type": "string" }
+      },
+      "required": ["id", "username", "name", "role"]
+    },
+    "InventoryItem": {
+      "title": "Inventory Item",
+      "description": "Stock item in the kitchen or housekeeping",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "currentStock": { "type": "number" },
+        "unit": { "type": "string" },
+        "unitCost": { "type": "number" },
+        "minStock": { "type": "number" },
+        "supplier": { "type": "string" },
+        "lastUpdated": { "type": "string" },
+        "section": { "type": "string", "enum": ["KITCHEN", "HOUSEKEEPING"] }
+      },
+      "required": ["id", "name", "category", "currentStock", "unit", "unitCost", "minStock", "supplier", "lastUpdated"]
+    },
+    "Requisition": {
+      "title": "Requisition Document",
+      "description": "Kitchen supply order request",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "requisitionNumber": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "createdByName": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "purpose": { "type": "string" },
+        "priority": { "type": "string", "enum": ["low", "medium", "high"] },
+        "status": { "type": "string", "enum": ["draft", "pending", "approved", "ordered", "received", "rejected"] },
+        "totalCost": { "type": "number" },
+        "notes": { "type": "string" },
+        "approvedBy": { "type": "string" },
+        "approvedByName": { "type": "string" },
+        "approvedAt": { "type": "string" },
+        "checkedBy": { "type": "string" },
+        "checkedByName": { "type": "string" },
+        "checkedAt": { "type": "string" },
+        "orderedAt": { "type": "string" },
+        "receivedAt": { "type": "string" },
+        "rejectedAt": { "type": "string" },
+        "rejectedBy": { "type": "string" },
+        "rejectedByName": { "type": "string" },
+        "isDeleted": { "type": "boolean" },
+        "deletedAt": { "type": "string" },
+        "deletedBy": { "type": "string" },
+        "deletedByName": { "type": "string" },
+        "approvedSignature": { "type": "string" },
+        "checkedSignature": { "type": "string" },
+        "requestingDept": { "type": "string" },
+        "quotationImageUrl": { "type": "string" },
+        "expectedDate": { "type": "string" },
+        "lastUpdated": { "type": "string" },
+        "items": { "type": "array" }
+      },
+      "required": ["id", "requisitionNumber", "createdBy", "createdByName", "createdAt", "purpose", "priority", "status", "totalCost", "items"]
+    },
+    "FoodRequisition": {
+      "title": "Food Requisition Document",
+      "description": "Kitchen and F&B food meal requisition request",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "requisitionNumber": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "createdByName": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "requestingDept": { "type": "string" },
+        "eventOrPurpose": { "type": "string" },
+        "mealType": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "completed", "rejected"] },
+        "totalCost": { "type": "number" },
+        "notes": { "type": "string" },
+        "approvedBy": { "type": "string" },
+        "approvedByName": { "type": "string" },
+        "approvedAt": { "type": "string" },
+        "approvedSignature": { "type": "string" },
+        "checkedBy": { "type": "string" },
+        "checkedByName": { "type": "string" },
+        "checkedAt": { "type": "string" },
+        "checkedSignature": { "type": "string" },
+        "rejectedBy": { "type": "string" },
+        "rejectedByName": { "type": "string" },
+        "rejectedAt": { "type": "string" },
+        "isDeleted": { "type": "boolean" },
+        "items": { "type": "array" }
+      },
+      "required": ["id", "requisitionNumber", "createdBy", "createdByName", "createdAt", "eventOrPurpose", "status", "totalCost", "items"]
+    },
+    "AuditLog": {
+      "title": "Audit Log",
+      "description": "System event log entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "action": { "type": "string" },
+        "details": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "userId", "username", "action", "details", "timestamp"]
+    },
+    "SystemConfig": {
+      "title": "System Config",
+      "description": "System branding and custom lists configuration",
+      "type": "object",
+      "properties": {
+        "categories": { "type": "array" },
+        "customLogo": { "type": "string" }
+      }
+    },
+    "Withdrawal": {
+      "title": "Withdrawal",
+      "description": "Warehouse stock withdrawal requests for housekeeping/linens",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "withdrawalNumber": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "createdByName": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "purpose": { "type": "string" },
+        "status": { "type": "string", "enum": ["draft", "pending", "approved", "completed", "rejected"] },
+        "items": { "type": "array" },
+        "notes": { "type": "string" },
+        "approvedBy": { "type": "string" },
+        "approvedByName": { "type": "string" },
+        "approvedAt": { "type": "string" },
+        "completedBy": { "type": "string" },
+        "completedByName": { "type": "string" },
+        "completedAt": { "type": "string" },
+        "rejectedBy": { "type": "string" },
+        "rejectedByName": { "type": "string" },
+        "rejectedAt": { "type": "string" },
+        "isDeleted": { "type": "boolean" }
+      },
+      "required": ["id", "withdrawalNumber", "createdBy", "createdByName", "createdAt", "purpose", "status", "items"]
+    },
+    "HotelRoom": {
+      "title": "Hotel Room",
+      "description": "Room record and deployed equipment/inventory assets inside the room",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "roomNumber": { "type": "string" },
+        "roomType": { "type": "string" },
+        "floor": { "type": "string" },
+        "status": { "type": "string" },
+        "deployedItems": { "type": "array" },
+        "lastInspected": { "type": "string" },
+        "notes": { "type": "string" }
+      },
+      "required": ["id", "roomNumber", "roomType", "deployedItems"]
+    },
+    "DamageReport": {
+      "title": "Damage Report",
+      "description": "Report for broken, damaged, missing, or spoiled items and equipment",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "reportNumber": { "type": "string" },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "itemId": { "type": "string" },
+              "itemName": { "type": "string" },
+              "category": { "type": "string" },
+              "quantity": { "type": "number" },
+              "unit": { "type": "string" },
+              "unitCost": { "type": "number" },
+              "totalCost": { "type": "number" },
+              "deductFromStock": { "type": "boolean" }
+            }
+          }
+        },
+        "itemId": { "type": "string" },
+        "itemName": { "type": "string" },
+        "category": { "type": "string" },
+        "location": { "type": "string" },
+        "quantity": { "type": "number" },
+        "unit": { "type": "string" },
+        "unitCost": { "type": "number" },
+        "totalCost": { "type": "number" },
+        "severity": { "type": "string", "enum": ["minor", "moderate", "severe", "beyond_repair", "missing"] },
+        "status": { "type": "string", "enum": ["reported", "under_review", "repaired", "written_off", "replaced"] },
+        "incidentDate": { "type": "string" },
+        "reportedBy": { "type": "string" },
+        "reportedByName": { "type": "string" },
+        "reportedAt": { "type": "string" },
+        "description": { "type": "string" },
+        "actionTaken": { "type": "string" },
+        "deductedFromStock": { "type": "boolean" },
+        "notes": { "type": "string" }
+      },
+      "required": ["id", "reportNumber", "itemName", "quantity", "unit", "severity", "status", "reportedBy", "reportedByName", "reportedAt", "description"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "User profiles and credentials"
+    },
+    "inventory/{itemId}": {
+      "schema": "InventoryItem",
+      "description": "Kitchen food and supply active stock items"
+    },
+    "requisitions/{requisitionId}": {
+      "schema": "Requisition",
+      "description": "Kitchen supply requisitions workflows and historical records"
+    },
+    "logs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Audit trail log entries"
+    },
+    "configs/{configId}": {
+      "schema": "SystemConfig",
+      "description": "Global custom configurations"
+    },
+    "withdrawals/{withdrawalId}": {
+      "schema": "Withdrawal",
+      "description": "Housekeeping and Linens warehouse stock withdrawal slips"
+    },
+    "rooms/{roomId}": {
+      "schema": "HotelRoom",
+      "description": "Hotel room records and deployed room equipments"
+    },
+    "damageReports/{reportId}": {
+      "schema": "DamageReport",
+      "description": "Reports for damaged, broken, missing, or spoiled hotel items"
+    },
+    "foodRequisitions/{requisitionId}": {
+      "schema": "FoodRequisition",
+      "description": "Food and meal requisition requests"
+    }
+  }
+}

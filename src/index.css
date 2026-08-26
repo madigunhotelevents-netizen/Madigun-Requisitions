@@ -1,0 +1,106 @@
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital,wght@0,400;0,700;1,400&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Instrument Serif", Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+body {
+  background-color: #F5F5F0;
+  color: #3E312C;
+  font-weight: 600;
+}
+
+/* Ensure font-semibold default across elements while respecting Tailwind text color classes */
+html, body, p, h1, h2, h3, h4, h5, h6, td, th, input, select, textarea, button, span, div {
+  font-weight: 600;
+}
+
+/* Print CSS media overrides */
+@media print {
+  /* Hide all elements on screen during printing, except the custom print container */
+  body * {
+    visibility: hidden;
+  }
+  
+  #requisition-print-sheet, 
+  #requisition-print-sheet *, 
+  #summary-report-print-sheet, 
+  #summary-report-print-sheet *,
+  #category-report-print-sheet,
+  #category-report-print-sheet *,
+  #inventory-count-sheet,
+  #inventory-count-sheet * {
+    visibility: visible !important;
+  }
+
+  #requisition-print-sheet {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    background-color: white !important;
+    color: black !important;
+    font-size: 12px !important;
+    padding: 20px !important;
+    display: block !important;
+  }
+
+  #summary-report-print-sheet {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    background-color: white !important;
+    color: black !important;
+    font-size: 12px !important;
+    padding: 20px !important;
+    display: block !important;
+  }
+
+  #category-report-print-sheet {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    background-color: white !important;
+    color: black !important;
+    font-size: 12px !important;
+    padding: 20px !important;
+    display: block !important;
+  }
+
+  #inventory-count-sheet {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    background-color: white !important;
+    color: black !important;
+    font-size: 12px !important;
+    padding: 20px !important;
+    display: block !important;
+  }
+
+  /* Force exact color printing */
+  th {
+    background-color: #F4F2EB !important;
+    color: #3E312C !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
+
+.print-only {
+  display: none !important;
+}
+
+@media print {
+  .print-only {
+    display: block !important;
+    visibility: visible !important;
+  }
+}
+
