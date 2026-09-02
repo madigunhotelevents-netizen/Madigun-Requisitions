@@ -522,6 +522,20 @@ export function GoogleDriveStorage({
   const quotaUsage = storageQuota?.usage ? Number(storageQuota.usage) : 0;
   const quotaPercent = Math.min(100, Math.round((quotaUsage / (quotaLimit || 1)) * 100));
 
+  if (currentUser.role !== 'admin' && currentUser.role !== 'managing_director') {
+    return (
+      <div className="bg-white border border-[#E6E4DD] rounded-[32px] p-10 text-center max-w-lg mx-auto my-12 shadow-sm" id="drive-restricted-notice">
+        <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center mx-auto mb-4 text-amber-700">
+          <AlertTriangle className="h-7 w-7" />
+        </div>
+        <h2 className="font-serif text-2xl font-bold text-[#3E312C] mb-2">Access Restricted</h2>
+        <p className="text-xs text-[#8C7A6B] leading-relaxed">
+          Google Drive cloud storage and database backups are restricted to the Property Custodian (Admin) and Hotel Managing Director (Primary Admin).
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6" id="google-drive-storage-module">
       

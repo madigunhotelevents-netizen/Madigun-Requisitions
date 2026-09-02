@@ -143,6 +143,18 @@ export default function App() {
   // Navigation state
   const [activeTab, setActiveTab] = useState<string>('dashboard');
 
+  // Enforce role-based access for restricted tabs
+  useEffect(() => {
+    if (currentUser) {
+      const isFull = currentUser.role === 'admin' || currentUser.role === 'managing_director';
+      if (!isFull && (activeTab === 'drive' || activeTab === 'accounts')) {
+        setActiveTab('dashboard');
+      } else if (currentUser.role !== 'admin' && activeTab === 'logs') {
+        setActiveTab('dashboard');
+      }
+    }
+  }, [currentUser?.role, activeTab]);
+
   // Passing dynamic automated items from Dashboard to Requisitions form
   const [autoRequisitionDraft, setAutoRequisitionDraft] = useState<Omit<RequisitionItem, 'itemName' | 'unitCost' | 'unit'>[] | null>(null);
 
@@ -1887,18 +1899,20 @@ export default function App() {
                 Damaged Items
               </button>
 
-              <button
-                onClick={() => setActiveTab('drive')}
-                className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold tracking-tight transition-all cursor-pointer ${
-                  activeTab === 'drive' 
-                    ? 'bg-[#3E312C] text-white shadow-xs' 
-                    : 'text-[#8C7A6B] hover:bg-[#EBE6DD] hover:text-[#3E312C]'
-                }`}
-                id="drive-desktop-tab"
-              >
-                <HardDrive className="h-4 w-4 text-amber-600" />
-                Google Drive
-              </button>
+              {isFullAccessUser && (
+                <button
+                  onClick={() => setActiveTab('drive')}
+                  className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold tracking-tight transition-all cursor-pointer ${
+                    activeTab === 'drive' 
+                      ? 'bg-[#3E312C] text-white shadow-xs' 
+                      : 'text-[#8C7A6B] hover:bg-[#EBE6DD] hover:text-[#3E312C]'
+                  }`}
+                  id="drive-desktop-tab"
+                >
+                  <HardDrive className="h-4 w-4 text-amber-600" />
+                  Google Drive
+                </button>
+              )}
 
               {isFullAccessUser && (
                 <button
@@ -2022,14 +2036,16 @@ export default function App() {
           <ShieldAlert className={`h-4 w-4 ${activeTab === 'damage_reports' ? 'text-rose-300' : 'text-rose-600'}`} />
           <span>Damaged</span>
         </button>
-        <button 
-          onClick={() => setActiveTab('drive')} 
-          className={`flex flex-col items-center justify-center min-w-[56px] min-h-[44px] px-2 py-1 rounded-xl text-[10px] font-bold transition-all ${activeTab === 'drive' ? 'bg-[#3E312C] text-white shadow-2xs' : 'text-[#8C7A6B] hover:bg-[#EBE6DD]'}`}
-          id="drive-mobile-tab"
-        >
-          <HardDrive className={`h-4 w-4 ${activeTab === 'drive' ? 'text-amber-300' : 'text-amber-600'}`} />
-          <span>Drive</span>
-        </button>
+        {isFullAccessUser && (
+          <button 
+            onClick={() => setActiveTab('drive')} 
+            className={`flex flex-col items-center justify-center min-w-[56px] min-h-[44px] px-2 py-1 rounded-xl text-[10px] font-bold transition-all ${activeTab === 'drive' ? 'bg-[#3E312C] text-white shadow-2xs' : 'text-[#8C7A6B] hover:bg-[#EBE6DD]'}`}
+            id="drive-mobile-tab"
+          >
+            <HardDrive className={`h-4 w-4 ${activeTab === 'drive' ? 'text-amber-300' : 'text-amber-600'}`} />
+            <span>Drive</span>
+          </button>
+        )}
         {isFullAccessUser && (
           <button 
             onClick={() => setActiveTab('accounts')} 
@@ -2147,7 +2163,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'drive' && (
+        {activeTab === 'drive' && isFullAccessUser && (
           <GoogleDriveStorage
             currentUser={currentUser}
             users={users}
