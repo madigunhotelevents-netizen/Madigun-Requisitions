@@ -61,7 +61,8 @@ const SECTION_CONFIG: Record<string, { label: string; icon: React.FC<{ className
   INDUSTRIAL_EQUIPMENTS: { label: 'Industrial Equipments', icon: Building },
   LUZON: { label: 'Luzon', icon: Layers },
   VISAYAS: { label: 'Visayas', icon: Layers },
-  MINDANAO: { label: 'Mindanao', icon: Layers }
+  MINDANAO: { label: 'Old H.R Office', icon: Layers },
+  OLD_HR_OFFICE: { label: 'Old H.R Office', icon: Layers }
 };
 
 export const getSectionLabel = (section?: string): string => {
@@ -454,7 +455,7 @@ export default function Withdrawals({
       autoTable(doc, {
         startY: tableStartY,
         margin: { left: 15, right: 15 },
-        head: [['#', 'Item Description', 'Inventory Section Tab', 'Requested Qty', 'Status']],
+        head: [['#', 'Item Name', 'Inventory Section Tab', 'Requested Qty', 'Status']],
         body: tableBody,
         theme: 'striped',
         headStyles: {

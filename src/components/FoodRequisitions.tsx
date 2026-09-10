@@ -100,7 +100,7 @@ export function FoodRequisitions({
       const matchDept = (req.requestingDept || '').toLowerCase().includes(query);
       const matchPurpose = req.eventOrPurpose.toLowerCase().includes(query);
       const matchCreator = req.createdByName.toLowerCase().includes(query);
-      const matchItem = req.items.some(i => i.mealName.toLowerCase().includes(query) || (i.description || '').toLowerCase().includes(query));
+      const matchItem = req.items.some(i => i.mealName.toLowerCase().includes(query));
       return matchNum || matchDept || matchPurpose || matchCreator || matchItem;
     }
 
@@ -223,7 +223,7 @@ export function FoodRequisitions({
     doc.setTextColor(255, 255, 255);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(16);
-    doc.text("MADIGUN HOTEL & ELEVEN SUITES", 14, 15);
+    doc.text("MADIGUN HOTEL & EVENTS", 14, 15);
 
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');

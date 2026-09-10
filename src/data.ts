@@ -657,7 +657,6 @@ export const INITIAL_FOOD_REQUISITIONS: FoodRequisition[] = [
       {
         id: 'fi-1',
         mealName: 'Executive Breakfast Platter (American / Filipino)',
-        description: 'Tenderloin Tapa, Garlic Rice, Eggs, Fresh Fruits & Brewed Coffee',
         paxOrQty: 10,
         unitPrice: 350,
         totalCost: 3500
@@ -665,7 +664,6 @@ export const INITIAL_FOOD_REQUISITIONS: FoodRequisition[] = [
       {
         id: 'fi-2',
         mealName: 'Fresh Tropical Fruit Juices (Pitcher)',
-        description: 'Chilled Fresh Mango and Pineapple Juice',
         paxOrQty: 3,
         unitPrice: 250,
         totalCost: 750
@@ -691,7 +689,6 @@ export const INITIAL_FOOD_REQUISITIONS: FoodRequisition[] = [
       {
         id: 'fi-3',
         mealName: 'Staff Duty Dinner Meal Combo',
-        description: 'Chicken Adobo, Steamed Jasmine Rice, Mixed Vegetables & Soup',
         paxOrQty: 18,
         unitPrice: 150,
         totalCost: 2700

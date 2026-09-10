@@ -44,7 +44,13 @@ interface RequisitionsProps {
   onClearDraftAuto: () => void;
   onCreateRequisition: (requisition: Omit<Requisition, 'id' | 'requisitionNumber' | 'createdBy' | 'createdByName' | 'createdAt' | 'totalCost'>) => void;
   onUpdateRequisition?: (requisitionId: string, updatedFields: Partial<Requisition>) => void;
-  onUpdateStatus: (requisitionId: string, newStatus: RequisitionStatus, signatureDataUrl?: string) => void;
+  onUpdateStatus: (
+    requisitionId: string, 
+    newStatus: RequisitionStatus, 
+    signatureDataUrl?: string, 
+    specificReceivedItems?: RequisitionItem[], 
+    receivedNotes?: string
+  ) => void;
   onCheckRequisition?: (requisitionId: string, signatureDataUrl?: string) => void;
   onReverseStatus: (requisitionId: string) => void;
   onDeleteRequisition: (requisitionId: string) => void;
@@ -435,6 +441,150 @@ export default function Requisitions({
 
   // Print Requisition
   const [activePrintReq, setActivePrintReq] = useState<Requisition | null>(null);
+
+  // Received Items Selection Modal state
+  const [receivingModalReq, setReceivingModalReq] = useState<Requisition | null>(null);
+  const [receivingItemsState, setReceivingItemsState] = useState<Array<{
+    itemId: string;
+    itemName: string;
+    requestedQty: number;
+    receivedQty: number;
+    requestedUnitCost: number;
+    actualUnitCost: number;
+    unit: string;
+    targetTab?: string;
+    allocatedLocation?: string;
+    category?: string;
+    isSelected: boolean;
+  }>>([]);
+  const [receivingNotes, setReceivingNotes] = useState('');
+  const [isConfirmingEmptyReceive, setIsConfirmingEmptyReceive] = useState(false);
+
+  const handleOpenReceiveModal = (req: Requisition) => {
+    setReceivingModalReq(req);
+    setReceivingNotes('');
+    setIsConfirmingEmptyReceive(false);
+    setReceivingItemsState(
+      (req.items || []).map(it => {
+        const cost = it.unitCost || 0;
+        return {
+          itemId: it.itemId,
+          itemName: it.itemName,
+          requestedQty: it.quantity || 0,
+          receivedQty: it.quantity || 0,
+          requestedUnitCost: cost,
+          actualUnitCost: cost,
+          unit: it.unit || 'pcs',
+          targetTab: it.targetTab,
+          allocatedLocation: it.allocatedLocation,
+          category: it.category,
+          isSelected: true
+        };
+      })
+    );
+  };
+
+  const handleToggleItemSelection = (index: number) => {
+    setIsConfirmingEmptyReceive(false);
+    setReceivingItemsState(prev => prev.map((item, idx) => {
+      if (idx !== index) return item;
+      const nextSelected = !item.isSelected;
+      return {
+        ...item,
+        isSelected: nextSelected,
+        receivedQty: nextSelected && item.receivedQty === 0 ? item.requestedQty : item.receivedQty
+      };
+    }));
+  };
+
+  const handleSetItemReceivedQty = (index: number, val: number) => {
+    setIsConfirmingEmptyReceive(false);
+    const safeQty = Math.max(0, isNaN(val) ? 0 : val);
+    setReceivingItemsState(prev => prev.map((item, idx) => {
+      if (idx !== index) return item;
+      return {
+        ...item,
+        receivedQty: safeQty,
+        isSelected: safeQty > 0
+      };
+    }));
+  };
+
+  const handleSetItemActualCost = (index: number, val: number) => {
+    setIsConfirmingEmptyReceive(false);
+    const safeCost = Math.max(0, isNaN(val) ? 0 : val);
+    setReceivingItemsState(prev => prev.map((item, idx) => {
+      if (idx !== index) return item;
+      return {
+        ...item,
+        actualUnitCost: safeCost
+      };
+    }));
+  };
+
+  const handleResetItemCost = (index: number) => {
+    setReceivingItemsState(prev => prev.map((item, idx) => {
+      if (idx !== index) return item;
+      return {
+        ...item,
+        actualUnitCost: item.requestedUnitCost
+      };
+    }));
+  };
+
+  const handleSelectAllReceiving = (selected: boolean) => {
+    setIsConfirmingEmptyReceive(false);
+    setReceivingItemsState(prev => prev.map(item => ({
+      ...item,
+      isSelected: selected,
+      receivedQty: selected ? (item.receivedQty > 0 ? item.receivedQty : item.requestedQty) : 0
+    })));
+  };
+
+  const handleResetReceivingToRequested = () => {
+    setIsConfirmingEmptyReceive(false);
+    setReceivingItemsState(prev => prev.map(item => ({
+      ...item,
+      isSelected: true,
+      receivedQty: item.requestedQty,
+      actualUnitCost: item.requestedUnitCost
+    })));
+  };
+
+  const handleConfirmReceived = () => {
+    if (!receivingModalReq) return;
+
+    // Filter items that are selected AND have receivedQty > 0
+    const purchasedItems: RequisitionItem[] = receivingItemsState
+      .filter(it => it.isSelected && it.receivedQty > 0)
+      .map(it => ({
+        itemId: it.itemId,
+        itemName: it.itemName,
+        quantity: it.receivedQty,
+        unit: it.unit,
+        unitCost: it.actualUnitCost, // Actual bought price passed into unitCost for inventory restock
+        actualUnitCost: it.actualUnitCost,
+        requestedUnitCost: it.requestedUnitCost,
+        targetTab: it.targetTab,
+        allocatedLocation: it.allocatedLocation,
+        category: it.category
+      }));
+
+    if (purchasedItems.length === 0 && !isConfirmingEmptyReceive) {
+      setIsConfirmingEmptyReceive(true);
+      return;
+    }
+
+    onUpdateStatus(
+      receivingModalReq.id, 
+      'received', 
+      undefined, 
+      purchasedItems, 
+      receivingNotes.trim() || undefined
+    );
+    setReceivingModalReq(null);
+    setIsConfirmingEmptyReceive(false);
+  };
 
   // Search & Filter state for back tracing
   const [searchQuery, setSearchQuery] = useState('');
@@ -859,7 +1009,7 @@ export default function Requisitions({
       autoTable(doc, {
         startY: nextY + 3,
         margin: { left: 15, right: 15 },
-        head: [['Material Description', 'Unit Cost (PHP)', 'Aggregated Volume', 'Aggregated Cost (PHP)']],
+        head: [['Material / Item Name', 'Unit Cost (PHP)', 'Aggregated Volume', 'Aggregated Cost (PHP)']],
         body: itemsBody,
         theme: 'striped',
         headStyles: {
@@ -1585,7 +1735,7 @@ export default function Requisitions({
                   <option value="INDUSTRIAL_EQUIPMENTS">Industrial Equipments</option>
                   <option value="LUZON">Luzon</option>
                   <option value="VISAYAS">Visayas</option>
-                  <option value="MINDANAO">Mindanao</option>
+                  <option value="MINDANAO">Old H.R Office</option>
                 </select>
               </div>
 
@@ -1637,7 +1787,7 @@ export default function Requisitions({
                   <option value="INDUSTRIAL_EQUIPMENTS">Industrial Equipments Tab</option>
                   <option value="LUZON">Luzon Tab</option>
                   <option value="VISAYAS">Visayas Tab</option>
-                  <option value="MINDANAO">Mindanao Tab</option>
+                  <option value="MINDANAO">Old H.R Office Tab</option>
                 </select>
               </div>
             </div>
@@ -1808,7 +1958,7 @@ export default function Requisitions({
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 items-end">
                     {/* Item Name */}
                     <div className="sm:col-span-2 md:col-span-1">
-                      <label htmlFor="custom-item-name" className="block text-[10px] font-mono text-[#8C7A6B] uppercase font-bold">Item Name / Description *</label>
+                      <label htmlFor="custom-item-name" className="block text-[10px] font-mono text-[#8C7A6B] uppercase font-bold">Item Name *</label>
                       <input
                         id="custom-item-name"
                         type="text"
@@ -2516,7 +2666,7 @@ export default function Requisitions({
                                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 items-end">
                                     {/* Item Name */}
                                     <div className="sm:col-span-2 md:col-span-1">
-                                      <label htmlFor="edit-custom-item-name" className="block text-[10px] font-mono text-[#8C7A6B] uppercase font-bold">Item Name / Description *</label>
+                                      <label htmlFor="edit-custom-item-name" className="block text-[10px] font-mono text-[#8C7A6B] uppercase font-bold">Item Name *</label>
                                       <input
                                         id="edit-custom-item-name"
                                         type="text"
@@ -2805,7 +2955,10 @@ export default function Requisitions({
                                 <thead className="bg-[#FAF9F5] font-bold text-[#8C7A6B] text-[10px] uppercase font-mono">
                                   <tr>
                                     <th scope="col" className="px-4 py-2.5 text-left">Product Item</th>
-                                    <th scope="col" className="px-4 py-2.5 text-left">Quantity Ordered</th>
+                                    <th scope="col" className="px-4 py-2.5 text-left">Quantity Requested</th>
+                                    {req.status === 'received' && (
+                                      <th scope="col" className="px-4 py-2.5 text-left">Purchased & Restocked</th>
+                                    )}
                                     <th scope="col" className="px-4 py-2.5 text-left">Rate</th>
                                     <th scope="col" className="px-4 py-2.5 text-right">Extended Value</th>
                                   </tr>
@@ -2813,20 +2966,97 @@ export default function Requisitions({
                                 <tbody className="divide-y divide-[#F0EFE9]">
                                   {req.items.map((it) => {
                                     const ext = it.quantity * it.unitCost;
+                                    const receivedItem = req.receivedItems?.find(ri => 
+                                      (ri.itemId && ri.itemId === it.itemId) || 
+                                      (ri.itemName && ri.itemName.trim().toLowerCase() === it.itemName.trim().toLowerCase())
+                                    );
+                                    const isPurchased = req.status === 'received' 
+                                      ? (req.receivedItems !== undefined ? (receivedItem && (receivedItem.quantity || 0) > 0) : true) 
+                                      : false;
+                                    const actualQty = receivedItem ? receivedItem.quantity : it.quantity;
+                                    const actualPrice = receivedItem 
+                                      ? (typeof receivedItem.actualUnitCost === 'number' ? receivedItem.actualUnitCost : (typeof receivedItem.unitCost === 'number' ? receivedItem.unitCost : it.unitCost))
+                                      : it.unitCost;
+                                    const actualExt = actualQty * actualPrice;
+                                    const priceDiff = actualPrice - it.unitCost;
+                                    const hasPriceChange = Math.abs(priceDiff) > 0.009;
+
                                     return (
-                                      <tr key={it.itemId}>
-                                        <td className="px-4 py-3 font-semibold text-[#3E312C]">{it.itemName}</td>
+                                      <tr key={it.itemId} className={req.status === 'received' && !isPurchased ? 'bg-stone-50/60 opacity-75' : ''}>
+                                        <td className="px-4 py-3 font-semibold text-[#3E312C]">
+                                          <div>{it.itemName}</div>
+                                          {req.status === 'received' && !isPurchased && (
+                                            <span className="text-[10px] font-bold text-[#8C7A6B] bg-stone-200/70 px-1.5 py-0.5 rounded">Not Purchased (Excluded from inventory)</span>
+                                          )}
+                                        </td>
                                         <td className="px-4 py-3 font-mono font-bold">{it.quantity} {it.unit}</td>
-                                        <td className="px-4 py-3 font-mono">₱{it.unitCost.toFixed(2)}</td>
-                                        <td className="px-4 py-3 text-right font-mono font-bold">₱{ext.toFixed(2)}</td>
+                                        {req.status === 'received' && (
+                                          <td className="px-4 py-3">
+                                            {isPurchased ? (
+                                              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-full">
+                                                <Check className="h-3 w-3" /> {actualQty} {it.unit} Restocked
+                                              </span>
+                                            ) : (
+                                              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-stone-500 bg-stone-100 border border-stone-300 px-2 py-0.5 rounded-full">
+                                                <X className="h-3 w-3" /> 0 {it.unit} (Skipped)
+                                              </span>
+                                            )}
+                                          </td>
+                                        )}
+                                        <td className="px-4 py-3 font-mono">
+                                          {req.status === 'received' && isPurchased ? (
+                                            <div>
+                                              <div className="font-bold text-emerald-900">₱{actualPrice.toFixed(2)}</div>
+                                              {hasPriceChange ? (
+                                                <div className="text-[10px] flex items-center gap-1 mt-0.5 flex-wrap">
+                                                  <span className="text-[#8C7A6B] line-through">₱{it.unitCost.toFixed(2)}</span>
+                                                  <span className={`font-semibold px-1 py-0.2 rounded text-[9px] ${
+                                                    priceDiff > 0 ? 'text-amber-800 bg-amber-100' : 'text-emerald-800 bg-emerald-100'
+                                                  }`}>
+                                                    {priceDiff > 0 ? `+₱${priceDiff.toFixed(2)}` : `-₱${Math.abs(priceDiff).toFixed(2)}`}
+                                                  </span>
+                                                </div>
+                                              ) : (
+                                                <span className="text-[10px] text-[#8C7A6B]">(Matched PR)</span>
+                                              )}
+                                            </div>
+                                          ) : (
+                                            <span>₱{it.unitCost.toFixed(2)}</span>
+                                          )}
+                                        </td>
+                                        <td className="px-4 py-3 text-right font-mono font-bold">
+                                          {req.status === 'received' && isPurchased ? (
+                                            <div>
+                                              <div className="text-emerald-900">₱{actualExt.toFixed(2)}</div>
+                                              {(Math.abs(actualExt - ext) > 0.009) && (
+                                                <div className="text-[10px] text-[#8C7A6B] font-normal line-through">₱{ext.toFixed(2)}</div>
+                                              )}
+                                            </div>
+                                          ) : (
+                                            <span>₱{ext.toFixed(2)}</span>
+                                          )}
+                                        </td>
                                       </tr>
                                     );
                                   })}
                                   {/* Summary */}
                                   <tr className="bg-[#FAF9F5] font-bold text-[#3E312C]">
-                                    <td colSpan={3} className="px-4 py-3 text-right">Sum Valuation:</td>
+                                    <td colSpan={req.status === 'received' ? 4 : 3} className="px-4 py-3 text-right">Requested PR Valuation:</td>
                                     <td className="px-4 py-3 text-right font-mono text-base font-extrabold text-[#3E312C]">₱{req.totalCost.toFixed(2)}</td>
                                   </tr>
+                                  {req.status === 'received' && req.receivedItems !== undefined && (
+                                    <tr className="bg-emerald-50/70 font-bold text-emerald-950 border-t border-emerald-200">
+                                      <td colSpan={4} className="px-4 py-3 text-right text-xs">
+                                        <span className="inline-flex items-center gap-1.5">
+                                          <PackageCheck className="h-4 w-4 text-emerald-700" />
+                                          Actual Inventory Restock Valuation ({req.receivedItems.filter(i => (i.quantity || 0) > 0).length} of {req.items.length} items purchased):
+                                        </span>
+                                      </td>
+                                      <td className="px-4 py-3 text-right font-mono text-base font-extrabold text-emerald-800">
+                                        ₱{req.receivedItems.reduce((sum, it) => sum + ((it.quantity || 0) * (typeof it.actualUnitCost === 'number' ? it.actualUnitCost : (it.unitCost || 0))), 0).toFixed(2)}
+                                      </td>
+                                    </tr>
+                                  )}
                                 </tbody>
                               </table>
                             </div>
@@ -2901,7 +3131,24 @@ export default function Requisitions({
                                       <p className="text-[#3E312C]">• Approved by: <span className="font-semibold">{req.approvedByName}</span></p>
                                     )}
                                     {req.receivedAt && (
-                                      <p className="text-[#3E312C] font-semibold">• Stock Synced: Received into warehouse active stock</p>
+                                      <div className="space-y-1 text-xs">
+                                        <p className="text-emerald-800 font-bold flex items-center gap-1">
+                                          <PackageCheck className="h-3.5 w-3.5 text-emerald-600" />
+                                          <span>Received by: <span className="text-[#3E312C]">{req.receivedByName || 'Purchaser'}</span> on {new Date(req.receivedAt).toLocaleString()}</span>
+                                        </p>
+                                        {req.receivedItems !== undefined ? (
+                                          <p className="text-[11px] text-[#6E5D4F] pl-4.5">
+                                            • Inventory Added: <span className="font-bold text-[#3E312C]">{req.receivedItems.filter(i => (i.quantity || 0) > 0).length} of {req.items.length} requested item(s)</span> restocked into warehouse inventory.
+                                          </p>
+                                        ) : (
+                                          <p className="text-[11px] text-[#6E5D4F] pl-4.5">• Stock Synced: Received into warehouse active stock</p>
+                                        )}
+                                        {req.receivedNotes && (
+                                          <p className="text-[11px] text-[#6E5D4F] pl-4.5 italic bg-[#FAF9F5] p-2 rounded-xl border border-[#EBE6DD] mt-1">
+                                            Notes: "{req.receivedNotes}"
+                                          </p>
+                                        )}
+                                      </div>
                                     )}
                                     {req.rejectedAt && (
                                       <p className="text-[#A65D46] font-semibold">• Rejected by: {req.rejectedByName}</p>
@@ -3066,17 +3313,17 @@ export default function Requisitions({
                                       </>
                                     )}
 
-                                    {/* State 2: Approved -> Receive directly */}
+                                    {/* State 2: Approved -> Receive with item confirmation */}
                                     {req.status === 'approved' && (
                                       <button
                                         type="button"
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          onUpdateStatus(req.id, 'received');
+                                          handleOpenReceiveModal(req);
                                         }}
-                                        className="flex items-center gap-1 bg-[#3E312C] hover:bg-[#2C211F] text-white px-5 py-2.5 rounded-full text-xs font-semibold cursor-pointer shadow-2xs transition-all"
+                                        className="flex items-center gap-1.5 bg-[#3E312C] hover:bg-[#2C211F] text-white px-5 py-2.5 rounded-full text-xs font-semibold cursor-pointer shadow-2xs transition-all"
                                       >
-                                        <PackageCheck className="h-3.5 w-3.5" /> Mark Received (Restock Active Inventory)
+                                        <PackageCheck className="h-3.5 w-3.5" /> Mark Received (Select Purchased Items)
                                       </button>
                                     )}
 
@@ -3198,28 +3445,77 @@ export default function Requisitions({
             </table>
 
             {/* Supply Items Table */}
-            <h3 style={{ fontSize: '14px', borderBottom: '1px solid #ddd', paddingBottom: '5px', marginBottom: '10px' }}>Requested Items</h3>
+            <h3 style={{ fontSize: '14px', borderBottom: '1px solid #ddd', paddingBottom: '5px', marginBottom: '10px' }}>
+              {activePrintReq.status === 'received' ? 'Purchased & Restocked Supply Items' : 'Requested Items'}
+            </h3>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', marginBottom: '30px' }}>
               <thead>
                 <tr style={{ backgroundColor: '#f2f2f2', textAlign: 'left', borderBottom: '1.5px solid #333' }}>
-                  <th style={{ padding: '8px', width: '50%' }}>Supply Product / Material</th>
-                  <th style={{ padding: '8px', textAlign: 'right', width: '15%' }}>Quantity</th>
-                  <th style={{ padding: '8px', textAlign: 'right', width: '15%' }}>Unit Price</th>
-                  <th style={{ padding: '8px', textAlign: 'right', width: '20%' }}>Subtotal</th>
+                  <th style={{ padding: '8px' }}>Supply Product / Material</th>
+                  <th style={{ padding: '8px', textAlign: 'right' }}>Requested</th>
+                  {activePrintReq.status === 'received' && (
+                    <th style={{ padding: '8px', textAlign: 'right' }}>Purchased & Restocked</th>
+                  )}
+                  <th style={{ padding: '8px', textAlign: 'right' }}>Unit Rate</th>
+                  <th style={{ padding: '8px', textAlign: 'right' }}>Subtotal</th>
                 </tr>
               </thead>
               <tbody>
-                {activePrintReq.items.map((it, idx) => (
-                  <tr key={idx} style={{ borderBottom: '1px solid #eee' }}>
-                    <td style={{ padding: '8px' }}>{it.itemName}</td>
-                    <td style={{ padding: '8px', textAlign: 'right' }}>{it.quantity} {it.unit}</td>
-                    <td style={{ padding: '8px', textAlign: 'right' }}>₱{it.unitCost.toFixed(2)}</td>
-                    <td style={{ padding: '8px', textAlign: 'right', fontWeight: 'bold' }}>₱{(it.quantity * it.unitCost).toFixed(2)}</td>
-                  </tr>
-                ))}
+                {activePrintReq.items.map((it, idx) => {
+                  const receivedItem = activePrintReq.receivedItems?.find(ri => 
+                    (ri.itemId && ri.itemId === it.itemId) || 
+                    (ri.itemName && ri.itemName.trim().toLowerCase() === it.itemName.trim().toLowerCase())
+                  );
+                  const isPurchased = activePrintReq.status === 'received' 
+                    ? (activePrintReq.receivedItems !== undefined ? (receivedItem && (receivedItem.quantity || 0) > 0) : true) 
+                    : false;
+                  const actualQty = receivedItem ? receivedItem.quantity : it.quantity;
+                  const actualPrice = receivedItem 
+                    ? (typeof receivedItem.actualUnitCost === 'number' ? receivedItem.actualUnitCost : (typeof receivedItem.unitCost === 'number' ? receivedItem.unitCost : it.unitCost))
+                    : it.unitCost;
+                  const lineTotal = activePrintReq.status === 'received'
+                    ? (isPurchased ? actualQty * actualPrice : 0)
+                    : it.quantity * it.unitCost;
+
+                  return (
+                    <tr key={idx} style={{ borderBottom: '1px solid #eee', color: activePrintReq.status === 'received' && !isPurchased ? '#999' : '#111' }}>
+                      <td style={{ padding: '8px' }}>
+                        {it.itemName}
+                        {activePrintReq.status === 'received' && !isPurchased && (
+                          <span style={{ fontSize: '10px', marginLeft: '6px', color: '#888' }}>(Not Purchased)</span>
+                        )}
+                      </td>
+                      <td style={{ padding: '8px', textAlign: 'right' }}>{it.quantity} {it.unit}</td>
+                      {activePrintReq.status === 'received' && (
+                        <td style={{ padding: '8px', textAlign: 'right', fontWeight: 'bold', color: isPurchased ? '#166534' : '#666' }}>
+                          {isPurchased ? `${actualQty} ${it.unit}` : '0 (Skipped)'}
+                        </td>
+                      )}
+                      <td style={{ padding: '8px', textAlign: 'right' }}>
+                        {activePrintReq.status === 'received' && isPurchased && Math.abs(actualPrice - it.unitCost) > 0.009 ? (
+                          <>
+                            <strong>₱{actualPrice.toFixed(2)}</strong> <span style={{ fontSize: '10px', color: '#888' }}>(PR: ₱{it.unitCost.toFixed(2)})</span>
+                          </>
+                        ) : (
+                          `₱${(activePrintReq.status === 'received' && isPurchased ? actualPrice : it.unitCost).toFixed(2)}`
+                        )}
+                      </td>
+                      <td style={{ padding: '8px', textAlign: 'right', fontWeight: 'bold' }}>₱{lineTotal.toFixed(2)}</td>
+                    </tr>
+                  );
+                })}
                 <tr style={{ borderTop: '2px solid #333', fontWeight: 'bold', fontSize: '13px' }}>
-                  <td colSpan={3} style={{ padding: '10px 8px', textAlign: 'right' }}>Total Estimated Valuation:</td>
-                  <td style={{ padding: '10px 8px', textAlign: 'right', fontSize: '14px', fontWeight: 'bold' }}>₱{activePrintReq.totalCost.toFixed(2)}</td>
+                  <td colSpan={activePrintReq.status === 'received' ? 4 : 3} style={{ padding: '10px 8px', textAlign: 'right' }}>
+                    {activePrintReq.status === 'received' && activePrintReq.receivedItems !== undefined 
+                      ? 'Actual Inventory Restock Total:' 
+                      : 'Total Estimated Valuation:'}
+                  </td>
+                  <td style={{ padding: '10px 8px', textAlign: 'right', fontSize: '14px', fontWeight: 'bold' }}>
+                    ₱{(activePrintReq.status === 'received' && activePrintReq.receivedItems !== undefined
+                      ? activePrintReq.receivedItems.reduce((sum, it) => sum + ((it.quantity || 0) * (typeof it.actualUnitCost === 'number' ? it.actualUnitCost : (it.unitCost || 0))), 0)
+                      : activePrintReq.totalCost
+                    ).toFixed(2)}
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -3315,7 +3611,7 @@ export default function Requisitions({
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
               <thead>
                 <tr style={{ backgroundColor: '#f2f2f2', textAlign: 'left', borderBottom: '1.5px solid #333' }}>
-                  <th style={{ padding: '8px', width: '45%' }}>Material Description</th>
+                  <th style={{ padding: '8px', width: '45%' }}>Material / Item Name</th>
                   <th style={{ padding: '8px', textAlign: 'right', width: '15%' }}>Unit Cost</th>
                   <th style={{ padding: '8px', textAlign: 'right', width: '20%' }}>Aggregated Volume</th>
                   <th style={{ padding: '8px', textAlign: 'right', width: '20%' }}>Aggregated Cost Valuation</th>
@@ -3752,6 +4048,351 @@ export default function Requisitions({
               >
                 Close Fullview
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================== */}
+      {/* MARK RECEIVED & PURCHASED ITEMS MODAL */}
+      {/* ========================================== */}
+      {receivingModalReq && (
+        <div 
+          className="fixed inset-0 z-[110] bg-[#3E312C]/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-200"
+          onClick={() => {
+            setReceivingModalReq(null);
+            setIsConfirmingEmptyReceive(false);
+          }}
+        >
+          <div 
+            className="bg-[#FAF9F5] border border-[#EBE6DD] rounded-3xl overflow-hidden max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl relative animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="p-5 sm:p-6 bg-white border-b border-[#EBE6DD] flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-[#3E312C] text-white flex items-center justify-center shadow-xs shrink-0">
+                  <PackageCheck className="h-5 w-5 text-emerald-400" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[#3E312C]">Mark Requisition Received & Select Purchased Items</h3>
+                  <p className="text-xs text-[#8C7A6B] font-mono mt-0.5">
+                    PR: <strong className="text-[#3E312C]">{receivingModalReq.requisitionNumber}</strong> • Dept: <span className="font-semibold text-[#3E312C]">{receivingModalReq.requestingDept || 'General'}</span> • Requested by: <span className="text-[#3E312C]">{receivingModalReq.createdByName}</span>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setReceivingModalReq(null);
+                  setIsConfirmingEmptyReceive(false);
+                }}
+                className="p-2 rounded-full hover:bg-[#FAF9F5] text-[#8C7A6B] hover:text-[#3E312C] transition-colors cursor-pointer border border-transparent hover:border-[#EBE6DD]"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Instruction Notice */}
+            <div className="px-5 py-3.5 bg-amber-50/80 border-b border-amber-200 flex items-start gap-2.5 text-xs text-amber-950">
+              <AlertCircle className="h-4 w-4 text-amber-700 shrink-0 mt-0.5" />
+              <div className="leading-relaxed">
+                <p className="font-semibold">Verify Purchased Items For Actual Inventory Restocking:</p>
+                <p className="text-[11px] text-amber-900 mt-0.5">
+                  Only the items checked below with received quantity &gt; 0 will be added to your active warehouse inventory stock. If an item was out of stock or not purchased, uncheck it or set quantity to 0 so your inventory counts remain 100% accurate.
+                </p>
+              </div>
+            </div>
+
+            {/* Batch Controls & Selection Status */}
+            <div className="px-5 py-3 bg-[#F5F2EB] border-b border-[#EBE6DD] flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleSelectAllReceiving(true)}
+                  className="px-3 py-1.5 bg-white border border-[#EBE6DD] hover:bg-[#FAF9F5] text-[#3E312C] font-semibold rounded-xl cursor-pointer text-xs transition-colors shadow-2xs"
+                >
+                  Select All
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSelectAllReceiving(false)}
+                  className="px-3 py-1.5 bg-white border border-[#EBE6DD] hover:bg-[#FAF9F5] text-stone-600 font-semibold rounded-xl cursor-pointer text-xs transition-colors shadow-2xs"
+                >
+                  Deselect All
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResetReceivingToRequested}
+                  className="px-3 py-1.5 bg-white border border-[#EBE6DD] hover:bg-[#FAF9F5] text-[#8C7A6B] hover:text-[#3E312C] font-semibold rounded-xl cursor-pointer text-xs transition-colors shadow-2xs"
+                >
+                  Reset All to PR (Qty & Prices)
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-mono font-bold text-[#3E312C] bg-white px-3 py-1 rounded-full border border-[#EBE6DD]">
+                  {receivingItemsState.filter(i => i.isSelected && i.receivedQty > 0).length} of {receivingItemsState.length} item(s) selected for restock
+                </span>
+              </div>
+            </div>
+
+            {/* Items Checklist List */}
+            <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-3.5 divide-y divide-[#EBE6DD]">
+              {receivingItemsState.map((item, idx) => {
+                const isItemActive = item.isSelected && item.receivedQty > 0;
+                const subtotal = isItemActive ? item.receivedQty * item.actualUnitCost : 0;
+                const priceDiff = item.actualUnitCost - item.requestedUnitCost;
+                const hasPriceChange = Math.abs(priceDiff) > 0.009;
+
+                return (
+                  <div 
+                    key={item.itemId || idx}
+                    className={`pt-3.5 first:pt-0 rounded-2xl p-3.5 sm:p-4 transition-all border ${
+                      isItemActive 
+                        ? 'bg-white border-emerald-300/80 shadow-xs' 
+                        : 'bg-[#FAF9F5]/80 border-[#EBE6DD] opacity-75'
+                    }`}
+                  >
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                      {/* Checkbox and item info */}
+                      <div className="flex items-start gap-3 flex-1 min-w-0">
+                        <input
+                          id={`receive-check-${idx}`}
+                          type="checkbox"
+                          checked={item.isSelected}
+                          onChange={() => handleToggleItemSelection(idx)}
+                          className="mt-1 h-5 w-5 rounded-md border-[#D5CEB2] text-[#3E312C] focus:ring-[#3E312C] cursor-pointer accent-[#3E312C]"
+                        />
+                        <div className="space-y-1.5 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <label htmlFor={`receive-check-${idx}`} className="text-sm font-bold text-[#3E312C] cursor-pointer hover:underline">
+                              {item.itemName}
+                            </label>
+                            {item.targetTab && (
+                              <span className="text-[10px] font-mono font-bold text-[#8C7A6B] bg-[#FAF9F5] border border-[#EBE6DD] px-2 py-0.5 rounded-md uppercase">
+                                {item.targetTab}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2.5 text-xs text-[#8C7A6B] flex-wrap">
+                            <span>Requested PR: <strong className="text-[#3E312C] font-mono">{item.requestedQty} {item.unit} @ ₱{item.requestedUnitCost.toFixed(2)}</strong></span>
+                            <span>•</span>
+                            <span>Est. PR Ext: <strong className="text-[#3E312C] font-mono">₱{(item.requestedQty * item.requestedUnitCost).toFixed(2)}</strong></span>
+                            {item.allocatedLocation && (
+                              <>
+                                <span>•</span>
+                                <span className="truncate max-w-[180px]">Dest: <strong className="text-[#3E312C]">{item.allocatedLocation}</strong></span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Controls: Quantity & Actual Price & Subtotal */}
+                      <div className="flex flex-wrap sm:flex-nowrap items-center gap-4 shrink-0 justify-between lg:justify-end">
+                        
+                        {/* 1. Qty Received Input */}
+                        <div className="flex flex-col items-start gap-1">
+                          <label htmlFor={`receive-qty-${idx}`} className="text-[10px] font-mono font-bold text-[#8C7A6B] uppercase">
+                            Qty Received:
+                          </label>
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              id={`receive-qty-${idx}`}
+                              type="number"
+                              min="0"
+                              step="any"
+                              value={item.receivedQty}
+                              onChange={(e) => handleSetItemReceivedQty(idx, parseFloat(e.target.value))}
+                              disabled={!item.isSelected}
+                              className={`w-20 px-2 py-1 text-xs font-mono font-bold text-center border rounded-lg focus:ring-2 focus:ring-[#3E312C] ${
+                                item.isSelected 
+                                  ? 'bg-white border-[#3E312C] text-[#3E312C]' 
+                                  : 'bg-stone-100 border-stone-200 text-stone-400 cursor-not-allowed'
+                              }`}
+                            />
+                            <span className="text-xs font-mono text-[#8C7A6B]">{item.unit}</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleSetItemReceivedQty(idx, item.requestedQty)}
+                              className="text-[10px] px-1.5 py-0.5 bg-[#FAF9F5] border border-[#EBE6DD] hover:bg-white text-[#3E312C] rounded cursor-pointer transition-colors"
+                            >
+                              Full ({item.requestedQty})
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleSetItemReceivedQty(idx, 0)}
+                              className="text-[10px] px-1.5 py-0.5 bg-[#FAF9F5] border border-[#EBE6DD] hover:bg-white text-stone-500 rounded cursor-pointer transition-colors"
+                            >
+                              None (0)
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* 2. Actual Bought Price Input */}
+                        <div className="flex flex-col items-start gap-1">
+                          <div className="flex items-center justify-between w-full gap-2">
+                            <label htmlFor={`receive-price-${idx}`} className="text-[10px] font-mono font-bold text-[#8C7A6B] uppercase">
+                              Actual Price / Unit:
+                            </label>
+                            {hasPriceChange && (
+                              <span className={`text-[9px] font-bold px-1 py-0.2 rounded ${
+                                priceDiff > 0 ? 'text-amber-800 bg-amber-100' : 'text-emerald-800 bg-emerald-100'
+                              }`}>
+                                {priceDiff > 0 ? `+₱${priceDiff.toFixed(2)}` : `-₱${Math.abs(priceDiff).toFixed(2)}`}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <div className="relative flex items-center">
+                              <span className="absolute left-2 text-xs font-mono font-bold text-[#8C7A6B]">₱</span>
+                              <input
+                                id={`receive-price-${idx}`}
+                                type="number"
+                                min="0"
+                                step="any"
+                                value={item.actualUnitCost}
+                                onChange={(e) => handleSetItemActualCost(idx, parseFloat(e.target.value))}
+                                disabled={!item.isSelected}
+                                className={`w-28 pl-5 pr-2 py-1 text-xs font-mono font-bold text-right border rounded-lg focus:ring-2 focus:ring-[#3E312C] ${
+                                  item.isSelected 
+                                    ? hasPriceChange 
+                                      ? 'bg-amber-50/50 border-amber-400 text-[#3E312C]' 
+                                      : 'bg-white border-[#3E312C] text-[#3E312C]' 
+                                    : 'bg-stone-100 border-stone-200 text-stone-400 cursor-not-allowed'
+                                }`}
+                              />
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleResetItemCost(idx)}
+                              title="Reset price to original PR quotation rate"
+                              className={`text-[10px] px-1.5 py-0.5 border rounded cursor-pointer transition-colors ${
+                                hasPriceChange 
+                                  ? 'bg-amber-100 border-amber-300 text-amber-900 font-semibold' 
+                                  : 'bg-[#FAF9F5] border-[#EBE6DD] text-[#8C7A6B] hover:bg-white hover:text-[#3E312C]'
+                              }`}
+                            >
+                              Reset to PR (₱{item.requestedUnitCost.toFixed(2)})
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* 3. Extended Subtotal & Pill */}
+                        <div className="w-32 text-right">
+                          <div className="text-[10px] font-mono text-[#8C7A6B] uppercase">Restock Total</div>
+                          <div className="text-sm font-mono font-bold text-[#3E312C]">
+                            ₱{subtotal.toFixed(2)}
+                          </div>
+                          <div className="mt-1">
+                            {isItemActive ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-100/90 border border-emerald-300 px-2 py-0.5 rounded-full">
+                                <Check className="h-3 w-3" /> Restock +{item.receivedQty}
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-stone-500 bg-stone-100 border border-stone-300 px-2 py-0.5 rounded-full">
+                                <X className="h-3 w-3" /> Exclude (0 stock)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Receiving Notes */}
+            <div className="p-4 sm:p-5 bg-white border-t border-[#EBE6DD] space-y-2">
+              <label htmlFor="receive-notes" className="block text-xs font-bold text-[#8C7A6B] uppercase tracking-wider">
+                Receiving Notes / Supplier Price Discrepancy Remarks (Optional)
+              </label>
+              <textarea
+                id="receive-notes"
+                value={receivingNotes}
+                onChange={(e) => setReceivingNotes(e.target.value)}
+                placeholder="e.g. Bought from Metro Supermarket at ₱125/kg instead of quoted ₱110/kg; out of stock items skipped..."
+                className="w-full text-xs p-3 border border-[#EBE6DD] rounded-xl bg-[#FAF9F5] focus:outline-hidden focus:ring-2 focus:ring-[#3E312C] focus:bg-white transition-all text-[#3E312C]"
+                rows={2}
+              />
+            </div>
+
+            {/* Empty Confirmation Prompt */}
+            {isConfirmingEmptyReceive && (
+              <div className="px-5 py-3 bg-red-50 border-t border-red-200 text-xs text-red-900 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 text-red-700 shrink-0" />
+                  <span>
+                    <strong>Warning:</strong> You have selected 0 items to add to inventory. Confirming will mark this requisition as Received, but NO stocks will be added to your active inventory.
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Modal Footer */}
+            <div className="p-4 sm:p-5 bg-[#FAF9F5] border-t border-[#EBE6DD] flex flex-col sm:flex-row items-center justify-between gap-4">
+              {(() => {
+                const activeItems = receivingItemsState.filter(i => i.isSelected && i.receivedQty > 0);
+                const actualTotal = activeItems.reduce((sum, it) => sum + (it.receivedQty * it.actualUnitCost), 0);
+                const requestedEstTotal = receivingModalReq.totalCost || 0;
+                const totalDiff = actualTotal - requestedEstTotal;
+
+                return (
+                  <div className="text-xs text-[#8C7A6B] text-center sm:text-left space-y-0.5">
+                    <div className="flex items-center gap-2 flex-wrap justify-center sm:justify-start">
+                      <span>Actual Restock Valuation: </span>
+                      <strong className="text-emerald-800 text-base font-mono font-extrabold">
+                        ₱{actualTotal.toFixed(2)}
+                      </strong>
+                      {Math.abs(totalDiff) > 0.009 && (
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full font-mono ${
+                          totalDiff > 0 ? 'bg-amber-100 text-amber-900 border border-amber-300' : 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                        }`}>
+                          {totalDiff > 0 ? `+₱${totalDiff.toFixed(2)} vs PR Est` : `-₱${Math.abs(totalDiff).toFixed(2)} vs PR Est`}
+                        </span>
+                      )}
+                    </div>
+                    <span className="block text-[11px] text-[#8C7A6B]">
+                      ({activeItems.length} of {receivingItemsState.length} items purchased • PR Quotation Est: ₱{requestedEstTotal.toFixed(2)})
+                    </span>
+                  </div>
+                );
+              })()}
+
+              <div className="flex items-center gap-3 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReceivingModalReq(null);
+                    setIsConfirmingEmptyReceive(false);
+                  }}
+                  className="flex-1 sm:flex-initial px-5 py-2.5 bg-white border border-[#EBE6DD] hover:bg-[#FAF9F5] text-[#3E312C] font-semibold text-xs rounded-full cursor-pointer transition-colors shadow-2xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmReceived}
+                  className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-6 py-2.5 text-white font-semibold text-xs rounded-full cursor-pointer shadow-sm transition-all ${
+                    isConfirmingEmptyReceive 
+                      ? 'bg-red-700 hover:bg-red-800' 
+                      : 'bg-[#3E312C] hover:bg-[#2C211F]'
+                  }`}
+                >
+                  <PackageCheck className="h-4 w-4 text-emerald-400" />
+                  {isConfirmingEmptyReceive 
+                    ? 'Confirm Received (Add 0 Items to Inventory)' 
+                    : `Confirm & Restock ${receivingItemsState.filter(i => i.isSelected && i.receivedQty > 0).length} Item(s)`
+                  }
+                </button>
+              </div>
             </div>
           </div>
         </div>

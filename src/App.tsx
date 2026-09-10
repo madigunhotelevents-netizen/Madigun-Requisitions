@@ -843,7 +843,13 @@ export default function App() {
   };
 
   // Update Requisition Status and Sync Stocks on Receive
-  const handleUpdateRequisitionStatus = async (reqId: string, newStatus: RequisitionStatus, signatureDataUrl?: string) => {
+  const handleUpdateRequisitionStatus = async (
+    reqId: string, 
+    newStatus: RequisitionStatus, 
+    signatureDataUrl?: string,
+    specificReceivedItems?: RequisitionItem[],
+    receivedNotes?: string
+  ) => {
     if (!currentUser) return;
 
     const targetReq = requisitions.find(r => r.id === reqId);
@@ -871,8 +877,19 @@ export default function App() {
       logDetails = `Dispatched orders for requisition ${targetReq.requisitionNumber} to respective suppliers.`;
     } else if (newStatus === 'received') {
       statusMetadata.receivedAt = timestamp;
+      statusMetadata.receivedBy = currentUser.id;
+      statusMetadata.receivedByName = currentUser.name;
+      if (specificReceivedItems !== undefined) {
+        statusMetadata.receivedItems = specificReceivedItems;
+      }
+      if (receivedNotes) {
+        statusMetadata.receivedNotes = receivedNotes;
+      }
+      const actualReceivedCount = specificReceivedItems 
+        ? specificReceivedItems.filter(i => (i.quantity || 0) > 0).length 
+        : targetReq.items.length;
       logAction = 'Received Requisition';
-      logDetails = `Delivered and verified items of ${targetReq.requisitionNumber}. Active stocks incremented in requesting department inventory.`;
+      logDetails = `Delivered and verified items of ${targetReq.requisitionNumber}. ${actualReceivedCount} item(s) confirmed and added to actual inventory.`;
     } else if (newStatus === 'rejected') {
       statusMetadata.rejectedBy = currentUser.id;
       statusMetadata.rejectedByName = currentUser.name;
@@ -925,11 +942,20 @@ export default function App() {
     const batch = writeBatch(db);
     let updatedCount = 0;
 
+    // Use specific received items if defined, otherwise fallback to targetReq.items
+    const itemsToProcess = (isReceived && targetReq.receivedItems !== undefined)
+      ? targetReq.receivedItems
+      : targetReq.items;
+
+    if (!itemsToProcess || itemsToProcess.length === 0) return;
+
     // Get target department/section for the inventory item
     const deptSection = (targetReq.requestingDept || 'KITCHEN') as InventorySection;
 
-    targetReq.items.forEach((reqItem, idx) => {
+    itemsToProcess.forEach((reqItem, idx) => {
       if (!reqItem) return;
+      // Skip if quantity is 0 or negative - item was NOT purchased!
+      if (typeof reqItem.quantity === 'number' && reqItem.quantity <= 0) return;
       const rawName = reqItem.itemName || '';
       const trimmedName = rawName.trim().toLowerCase();
       if (!trimmedName) return;
@@ -940,35 +966,42 @@ export default function App() {
         (i.name && i.name.trim().toLowerCase() === trimmedName && (i.section || 'KITCHEN') === deptSection)
       );
 
+      // Determine the bought price (actualUnitCost prioritized, or unitCost)
+      const boughtPrice = (typeof reqItem.actualUnitCost === 'number' && reqItem.actualUnitCost >= 0)
+        ? reqItem.actualUnitCost
+        : ((typeof reqItem.unitCost === 'number' && reqItem.unitCost >= 0) ? reqItem.unitCost : undefined);
+
       if (existing) {
         if (isReceived) {
-          // Increment stock when received
+          // Increment stock when received and update to actual bought price
           batch.set(doc(db, 'inventory', existing.id), cleanUndefined({
             ...existing,
             currentStock: (existing.currentStock || 0) + (reqItem.quantity || 0),
-            unitCost: (reqItem.unitCost && reqItem.unitCost > 0) ? reqItem.unitCost : (existing.unitCost || 0),
+            unitCost: boughtPrice !== undefined ? boughtPrice : (existing.unitCost || 0),
             lastUpdated: timestamp
           }));
           updatedCount++;
         }
       } else {
-        // Automatically create the new requested item in the inventory of the requesting department
-        const newInvId = (reqItem.itemId && !reqItem.itemId.startsWith('replaced_')) ? reqItem.itemId : `inv_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`;
-        const newInvItem: InventoryItem = {
-          id: newInvId,
-          name: rawName.trim(),
-          category: reqItem.targetTab || targetReq.requestingDept || 'General Requisitions',
-          section: deptSection,
-          currentStock: isReceived ? (reqItem.quantity || 0) : 0, // Initialized with received qty or 0 if approved
-          unit: reqItem.unit || 'pcs',
-          unitCost: reqItem.unitCost || 0,
-          minStock: 5,
-          supplier: 'Requisition Restock',
-          lastUpdated: timestamp
-        };
+        // Automatically create the new requested item in the inventory of the requesting department ONLY if actually received
+        if (isReceived) {
+          const newInvId = (reqItem.itemId && !reqItem.itemId.startsWith('replaced_')) ? reqItem.itemId : `inv_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`;
+          const newInvItem: InventoryItem = {
+            id: newInvId,
+            name: rawName.trim(),
+            category: reqItem.targetTab || targetReq.requestingDept || 'General Requisitions',
+            section: deptSection,
+            currentStock: reqItem.quantity || 0,
+            unit: reqItem.unit || 'pcs',
+            unitCost: boughtPrice !== undefined ? boughtPrice : 0,
+            minStock: 5,
+            supplier: targetReq.quotationVendor || 'Requisition Restock',
+            lastUpdated: timestamp
+          };
 
-        batch.set(doc(db, 'inventory', newInvId), cleanUndefined(newInvItem));
-        updatedCount++;
+          batch.set(doc(db, 'inventory', newInvId), cleanUndefined(newInvItem));
+          updatedCount++;
+        }
       }
     });
 
@@ -1036,6 +1069,10 @@ export default function App() {
       checkedSignature: undefined,
       orderedAt: undefined,
       receivedAt: undefined,
+      receivedBy: undefined,
+      receivedByName: undefined,
+      receivedItems: undefined,
+      receivedNotes: undefined,
       rejectedAt: undefined,
       rejectedBy: undefined,
       rejectedByName: undefined,
@@ -1049,9 +1086,16 @@ export default function App() {
       // If it was already received, we reverse the quantities from active stock!
       if (targetReq.status === 'received') {
         const batch = writeBatch(db);
+        const itemsToReverse = (targetReq.receivedItems !== undefined)
+          ? targetReq.receivedItems
+          : targetReq.items;
+
         inventory.forEach(invItem => {
-          const reqItem = targetReq.items.find(ri => ri.itemId === invItem.id);
-          if (reqItem) {
+          const reqItem = itemsToReverse.find(ri => 
+            (ri.itemId && ri.itemId === invItem.id) || 
+            (ri.itemName && invItem.name && ri.itemName.trim().toLowerCase() === invItem.name.trim().toLowerCase())
+          );
+          if (reqItem && (reqItem.quantity || 0) > 0) {
             batch.set(doc(db, 'inventory', invItem.id), cleanUndefined({
               ...invItem,
               currentStock: Math.max(0, (invItem.currentStock || 0) - (reqItem.quantity || 0)),
@@ -1306,6 +1350,8 @@ export default function App() {
         itemId: primaryItem.itemId,
         itemName: summaryItemName,
         category: summaryCategory,
+        roomNumber: draft.roomNumber || primaryItem.roomNumber,
+        location: draft.location || (draft.roomNumber ? `Room ${draft.roomNumber}` : undefined),
         quantity: itemsList.reduce((sum, i) => sum + (i.quantity || 0), 0),
         unit: itemsList.length === 1 ? (primaryItem.unit || 'pcs') : 'items',
         unitCost: primaryItem.unitCost || 0,
@@ -1518,7 +1564,7 @@ export default function App() {
   const handleExportBackup = () => {
     if (!currentUser || currentUser.role !== 'admin') return;
     const backupData = {
-      system: 'Madigun Hotel Eleven Property Management System',
+      system: 'Madigun Hotel & Events Property Management System',
       version: '2.0.0',
       exportedAt: new Date().toISOString(),
       exportedBy: currentUser.username || currentUser.name,

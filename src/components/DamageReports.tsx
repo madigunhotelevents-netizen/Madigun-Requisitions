@@ -40,7 +40,8 @@ export const INVENTORY_TABS = [
   { key: 'INDUSTRIAL_EQUIPMENTS', name: 'Industrial Equipments' },
   { key: 'LUZON', name: 'Luzon' },
   { key: 'VISAYAS', name: 'Visayas' },
-  { key: 'MINDANAO', name: 'Mindanao' }
+  { key: 'MINDANAO', name: 'Old H.R Office' },
+  { key: 'OLD_HR_OFFICE', name: 'Old H.R Office' }
 ];
 
 export interface FormDamageItem {
@@ -88,7 +89,7 @@ export default function DamageReports({
 
   // Overall PDF Report Modal state
   const [isOverallReportModalOpen, setIsOverallReportModalOpen] = useState(false);
-  const [overallTimeframe, setOverallTimeframe] = useState<'this_week' | 'this_month' | 'last_month' | 'custom'>('this_month');
+  const [overallTimeframe, setOverallTimeframe] = useState<'this_week' | 'this_month' | 'last_month' | 'all_time' | 'custom'>('this_month');
   const [customStartDate, setCustomStartDate] = useState(() => {
     const d = new Date();
     d.setDate(1);
@@ -326,7 +327,7 @@ export default function DamageReports({
     }
 
     if (!description.trim()) {
-      setFormError('Please provide a brief description / cause of the incident.');
+      setFormError('Please provide the cause of the incident.');
       return;
     }
 
@@ -445,7 +446,7 @@ export default function DamageReports({
     doc.setTextColor(255, 255, 255);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(16);
-    doc.text("MADIGUN HOTEL ELEVEN", 14, 15);
+    doc.text("MADIGUN HOTEL & EVENTS", 14, 15);
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
@@ -501,7 +502,7 @@ export default function DamageReports({
       startY: itemTableY + 4,
       head: [['#', 'Item Name', 'Room / Location', 'Category Tab', 'Qty & Unit', 'Unit Cost', 'Total Loss', 'Deducted']],
       body: tableRows,
-      foot: [['', 'TOTAL ESTIMATED FINANCIAL IMPACT', '', '', '', `PHP ${(report.totalCost || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`, '']],
+      foot: [['', 'TOTAL ESTIMATED FINANCIAL IMPACT', '', '', '', '', `PHP ${(report.totalCost || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`, '']],
       theme: 'striped',
       headStyles: { fillColor: [166, 93, 70], textColor: [255, 255, 255], fontStyle: 'bold' },
       footStyles: { fillColor: [240, 239, 233], textColor: [62, 49, 44], fontStyle: 'bold' },
@@ -512,24 +513,33 @@ export default function DamageReports({
     const currentY = (doc as any).lastAutoTable.finalY + 8;
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
-    doc.text("CAUSE & DESCRIPTION OF INCIDENT:", 14, currentY);
+    doc.text("CAUSE OF INCIDENT:", 14, currentY);
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
-    const splitDesc = doc.splitTextToSize(report.description, 180);
+    const splitDesc = doc.splitTextToSize(report.description || 'N/A', 180);
     doc.text(splitDesc, 14, currentY + 5);
 
+    let nextY = currentY + 5 + (splitDesc.length * 4.5);
+
     if (report.notes) {
-      const notesY = currentY + 5 + (splitDesc.length * 4.5) + 5;
+      nextY += 5;
       doc.setFont('helvetica', 'bold');
-      doc.text("ACTION TAKEN / REMARKS:", 14, notesY);
+      doc.text("ACTION TAKEN / REMARKS:", 14, nextY);
       doc.setFont('helvetica', 'normal');
       const splitNotes = doc.splitTextToSize(report.notes, 180);
-      doc.text(splitNotes, 14, notesY + 5);
+      doc.text(splitNotes, 14, nextY + 5);
+      nextY += 5 + (splitNotes.length * 4.5);
     }
 
     // Signatures
-    const sigY = 245;
+    let sigY = Math.max(nextY + 12, 240);
+    const pageHeight = doc.internal.pageSize.getHeight();
+    if (sigY + 28 > pageHeight - 10) {
+      doc.addPage();
+      sigY = 40;
+    }
+
     doc.setLineDashPattern([1, 1], 0);
     doc.line(14, sigY, 70, sigY);
     doc.line(80, sigY, 130, sigY);
@@ -546,6 +556,20 @@ export default function DamageReports({
     doc.text("APPROVED BY", 140, sigY + 5);
     doc.text("Managing Director", 140, sigY + 9);
 
+    // Page numbering
+    const totalPages = (doc as any).internal.getNumberOfPages();
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
+      doc.setFontSize(7.5);
+      doc.setTextColor(140, 122, 107);
+      doc.text(
+        `Page ${i} of ${totalPages} • Madigun Hotel & Events • Incident Slip Ref: ${report.reportNumber}`,
+        doc.internal.pageSize.getWidth() / 2,
+        doc.internal.pageSize.getHeight() - 6,
+        { align: 'center' }
+      );
+    }
+
     doc.save(`Damage_Report_${report.reportNumber}.pdf`);
   };
 
@@ -553,24 +577,29 @@ export default function DamageReports({
   const handleGenerateOverallSummaryPDF = () => {
     let startDateStr = '';
     let endDateStr = '';
-    const now = new Date();
 
     if (overallTimeframe === 'this_week') {
-      const day = now.getDay();
-      const diffToMon = now.getDate() - day + (day === 0 ? -6 : 1);
-      const start = new Date(now.setDate(diffToMon));
+      const nowCopy = new Date();
+      const day = nowCopy.getDay();
+      const diffToMon = nowCopy.getDate() - day + (day === 0 ? -6 : 1);
+      const start = new Date(nowCopy.setDate(diffToMon));
       const end = new Date();
       startDateStr = start.toISOString().split('T')[0];
       endDateStr = end.toISOString().split('T')[0];
     } else if (overallTimeframe === 'this_month') {
-      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      const nowCopy = new Date();
+      const start = new Date(nowCopy.getFullYear(), nowCopy.getMonth(), 1);
       startDateStr = start.toISOString().split('T')[0];
       endDateStr = new Date().toISOString().split('T')[0];
     } else if (overallTimeframe === 'last_month') {
-      const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const end = new Date(now.getFullYear(), now.getMonth(), 0);
+      const nowCopy = new Date();
+      const start = new Date(nowCopy.getFullYear(), nowCopy.getMonth() - 1, 1);
+      const end = new Date(nowCopy.getFullYear(), nowCopy.getMonth(), 0);
       startDateStr = start.toISOString().split('T')[0];
       endDateStr = end.toISOString().split('T')[0];
+    } else if (overallTimeframe === 'all_time') {
+      startDateStr = '';
+      endDateStr = '';
     } else {
       startDateStr = customStartDate;
       endDateStr = customEndDate;
@@ -578,38 +607,50 @@ export default function DamageReports({
 
     // Filter reports in range
     const filteredForPDF = reports.filter(r => {
-      const rDate = r.incidentDate || r.reportedAt.split('T')[0];
-      const matchRange = rDate >= startDateStr && rDate <= endDateStr;
-      const matchCategory = overallCategoryFilter === 'all' || (r.category || '').toLowerCase().includes(overallCategoryFilter.toLowerCase());
+      const rDate = r.incidentDate || (r.reportedAt ? r.reportedAt.slice(0, 10) : '');
+      const matchRange = (!startDateStr || rDate >= startDateStr) && (!endDateStr || rDate <= endDateStr);
+      const rCategory = (r.category || '').toLowerCase();
+      const itemsCategories = (r.items || []).map(i => (i.category || '').toLowerCase()).join(' ');
+      const matchCategory = overallCategoryFilter === 'all' || 
+        rCategory.includes(overallCategoryFilter.toLowerCase()) || 
+        itemsCategories.includes(overallCategoryFilter.toLowerCase());
       const matchSeverity = overallSeverityFilter === 'all' || r.severity === overallSeverityFilter;
       const matchStatus = overallStatusFilter === 'all' || r.status === overallStatusFilter;
       return matchRange && matchCategory && matchSeverity && matchStatus;
     });
 
-    const doc = new jsPDF();
+    const doc = new jsPDF({
+      orientation: 'landscape',
+      unit: 'mm',
+      format: 'a4'
+    });
 
-    // Brand Header
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+
+    // Brand Header Bar
     doc.setFillColor(62, 49, 44);
-    doc.rect(0, 0, 210, 36, 'F');
+    doc.rect(0, 0, pageWidth, 35, 'F');
 
     doc.setTextColor(255, 255, 255);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(16);
-    doc.text("MADIGUN HOTEL ELEVEN", 14, 16);
+    doc.text("MADIGUN HOTEL & EVENTS", 14, 15);
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
-    doc.text("OVERALL INCIDENTS & DAMAGE SUMMARY REPORT", 14, 25);
+    doc.text("OVERALL PROPERTY INCIDENTS & DAMAGE AUDIT REPORT", 14, 24);
 
+    const coverageText = startDateStr && endDateStr ? `${startDateStr} to ${endDateStr}` : 'All Historical Records';
     doc.setFontSize(8.5);
-    doc.text(`DATE GENERATED: ${new Date().toLocaleDateString()}`, 140, 16);
-    doc.text(`COVERAGE: ${startDateStr} to ${endDateStr}`, 140, 23);
-    doc.text(`PREPARED BY: ${currentUser.name}`, 140, 30);
+    doc.text(`DATE GENERATED: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}`, pageWidth - 14, 14, { align: 'right' });
+    doc.text(`COVERAGE: ${coverageText}`, pageWidth - 14, 21, { align: 'right' });
+    doc.text(`PREPARED BY: ${currentUser.name} (${currentUser.role === 'admin' ? 'Property Custodian' : currentUser.role === 'managing_director' ? 'Managing Director' : 'Staff'})`, pageWidth - 14, 28, { align: 'right' });
 
     // KPI Metrics Calculation
     let totalItemsDamagedCount = 0;
     let totalLossVal = 0;
-    const categoryTotals: Record<string, { count: number; loss: number }> = {};
+    const categoryTotals: Record<string, { count: number; loss: number; incidentCount: number }> = {};
 
     filteredForPDF.forEach(r => {
       const items = getReportItems(r);
@@ -619,106 +660,165 @@ export default function DamageReports({
         totalLossVal += loss;
 
         const catKey = i.category || r.category || 'General';
-        if (!categoryTotals[catKey]) categoryTotals[catKey] = { count: 0, loss: 0 };
+        if (!categoryTotals[catKey]) {
+          categoryTotals[catKey] = { count: 0, loss: 0, incidentCount: 0 };
+        }
         categoryTotals[catKey].count += i.quantity;
         categoryTotals[catKey].loss += loss;
       });
+
+      const primaryCat = r.category || items[0]?.category || 'General';
+      if (categoryTotals[primaryCat]) {
+        categoryTotals[primaryCat].incidentCount += 1;
+      }
     });
 
     // Executive Summary Box
     doc.setTextColor(62, 49, 44);
     doc.setFontSize(11);
     doc.setFont('helvetica', 'bold');
-    doc.text("EXECUTIVE SUMMARY", 14, 46);
+    doc.text("EXECUTIVE SUMMARY", 14, 44);
 
     autoTable(doc, {
-      startY: 50,
-      head: [['Total Incident Reports', 'Total Item Units Damaged', 'Total Estimated Loss (PHP)', 'Period Covered']],
+      startY: 48,
+      head: [['Total Incident Reports', 'Total Item Units Damaged', 'Total Estimated Loss (PHP)', 'Period Covered', 'Departments Involved']],
       body: [[
         filteredForPDF.length.toString(),
         totalItemsDamagedCount.toString(),
         `PHP ${totalLossVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-        `${startDateStr} to ${endDateStr}`
+        coverageText,
+        `${Object.keys(categoryTotals).length} Category / Tab(s)`
       ]],
       theme: 'grid',
       headStyles: { fillColor: [62, 49, 44], textColor: [255, 255, 255], fontStyle: 'bold' },
-      styles: { fontSize: 9, halign: 'center', cellPadding: 3 }
+      styles: { fontSize: 8.5, halign: 'center', cellPadding: 2.5 }
     });
 
     // Category Breakdown Table
     const catY = (doc as any).lastAutoTable.finalY + 8;
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
-    doc.text("CATEGORY & DEPARTMENTS BREAKDOWN:", 14, catY);
+    doc.setTextColor(62, 49, 44);
+    doc.text("CATEGORY & DEPARTMENTS FINANCIAL IMPACT BREAKDOWN:", 14, catY);
 
     const catRows = Object.entries(categoryTotals).map(([catName, data]) => [
       catName,
-      `${data.count} units`,
+      `${data.count} unit(s)`,
+      `${data.incidentCount} report(s)`,
       `PHP ${data.loss.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     ]);
 
     autoTable(doc, {
       startY: catY + 4,
-      head: [['Inventory Category / Tab', 'Quantity Damaged', 'Subtotal Financial Loss']],
-      body: catRows.length > 0 ? catRows : [['No incidents recorded in this timeframe', '0', 'PHP 0.00']],
+      head: [['Inventory Category / Department', 'Quantity Damaged', 'Incident Frequency', 'Subtotal Financial Loss']],
+      body: catRows.length > 0 ? catRows : [['No incidents recorded in this timeframe', '0 units', '0 reports', 'PHP 0.00']],
       theme: 'striped',
       headStyles: { fillColor: [166, 93, 70], textColor: [255, 255, 255], fontStyle: 'bold' },
-      styles: { fontSize: 8.5, cellPadding: 2.5 }
+      styles: { fontSize: 8, cellPadding: 2 }
     });
 
-    // Detailed Log Table
+    // Detailed Log Table including Cause & Description
     const logY = (doc as any).lastAutoTable.finalY + 8;
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
-    doc.text("DETAILED INCIDENT LOGS:", 14, logY);
+    doc.setTextColor(62, 49, 44);
+    doc.text("DETAILED INCIDENT LOGS (INCLUDING CAUSE OF INCIDENT):", 14, logY);
 
     const logRows = filteredForPDF.map(r => {
       const items = getReportItems(r);
-      const itemsSummary = items.map(i => `${i.itemName} (${i.quantity} ${i.unit})`).join(', ');
+      const itemsSummary = items.map(i => `${i.itemName} (${i.quantity} ${i.unit || 'pcs'})`).join('\n');
       const reportLoss = r.totalCost || (r.quantity * (r.unitCost || 0));
+      const locationDisplay = r.roomNumber ? `Room ${r.roomNumber}` : (r.location || 'General Facility');
+
+      let incidentDetails = (r.description && r.description.trim()) ? r.description.trim() : 'No incident cause provided';
+      if (r.actionTaken && r.actionTaken.trim()) {
+        incidentDetails += `\n[Action Taken: ${r.actionTaken.trim()}]`;
+      } else if (r.notes && r.notes.trim()) {
+        incidentDetails += `\n[Remarks: ${r.notes.trim()}]`;
+      }
 
       return [
         r.reportNumber,
-        r.incidentDate,
+        r.incidentDate || (r.reportedAt ? r.reportedAt.slice(0, 10) : '-'),
+        locationDisplay,
         itemsSummary,
-        r.category || 'General',
+        r.category || items[0]?.category || 'General',
+        incidentDetails,
         r.severity.toUpperCase().replace('_', ' '),
         r.status.toUpperCase().replace('_', ' '),
-        r.reportedByName,
+        r.reportedByName || 'Staff',
         `PHP ${reportLoss.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
       ];
     });
 
     autoTable(doc, {
       startY: logY + 4,
-      head: [['Ref #', 'Date', 'Damaged Item(s)', 'Category', 'Severity', 'Status', 'Reporter', 'Loss']],
-      body: logRows.length > 0 ? logRows : [['-', '-', 'No incident reports found matching criteria', '-', '-', '-', '-', 'PHP 0.00']],
-      foot: [['', '', '', '', '', '', 'GRAND TOTAL:', `PHP ${totalLossVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`]],
+      head: [['Ref #', 'Date', 'Location', 'Damaged Item(s)', 'Category', 'Cause of Incident', 'Severity', 'Status', 'Reported By', 'Total Loss']],
+      body: logRows.length > 0 ? logRows : [['-', '-', '-', 'No incident reports found matching criteria', '-', '-', '-', '-', '-', 'PHP 0.00']],
+      foot: [['', '', '', '', '', '', '', '', 'GRAND TOTAL:', `PHP ${totalLossVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`]],
       theme: 'grid',
-      headStyles: { fillColor: [62, 49, 44], textColor: [255, 255, 255], fontStyle: 'bold' },
-      footStyles: { fillColor: [240, 239, 233], textColor: [62, 49, 44], fontStyle: 'bold' },
-      styles: { fontSize: 8, cellPadding: 2 }
+      headStyles: { fillColor: [62, 49, 44], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.5 },
+      footStyles: { fillColor: [240, 239, 233], textColor: [62, 49, 44], fontStyle: 'bold', fontSize: 8 },
+      styles: { fontSize: 7.5, cellPadding: 2, overflow: 'linebreak' },
+      columnStyles: {
+        0: { fontStyle: 'bold', cellWidth: 23 },
+        1: { cellWidth: 18 },
+        2: { cellWidth: 20 },
+        3: { cellWidth: 40 },
+        4: { cellWidth: 22 },
+        5: { cellWidth: 69 },
+        6: { cellWidth: 19 },
+        7: { cellWidth: 19 },
+        8: { cellWidth: 22 },
+        9: { cellWidth: 22, halign: 'right', fontStyle: 'bold' }
+      }
     });
 
     // Signatures
-    const finalY = Math.max((doc as any).lastAutoTable.finalY + 20, 240);
+    let finalY = (doc as any).lastAutoTable.finalY + 12;
+    if (finalY + 28 > pageHeight - 14) {
+      doc.addPage();
+      finalY = 28;
+    }
+
     doc.setLineDashPattern([1, 1], 0);
-    doc.line(14, finalY, 70, finalY);
-    doc.line(80, finalY, 130, finalY);
-    doc.line(140, finalY, 195, finalY);
+    doc.line(14, finalY, 80, finalY);
+    doc.line(110, finalY, 180, finalY);
+    doc.line(210, finalY, 280, finalY);
 
     doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
-    doc.text("PREPARED BY", 14, finalY + 5);
-    doc.text(currentUser.name, 14, finalY + 9);
+    doc.setTextColor(62, 49, 44);
+    doc.text("PREPARED BY", 14, finalY + 4);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`${currentUser.name} (${currentUser.role === 'admin' ? 'Property Custodian' : currentUser.role === 'managing_director' ? 'Managing Director' : 'Staff'})`, 14, finalY + 8);
 
-    doc.text("REVIEWED BY (ACCOUNTING)", 80, finalY + 5);
-    doc.text("Finance Manager", 80, finalY + 9);
+    doc.setFont('helvetica', 'bold');
+    doc.text("REVIEWED & AUDITED BY", 110, finalY + 4);
+    doc.setFont('helvetica', 'normal');
+    doc.text("Finance & Property Administration", 110, finalY + 8);
 
-    doc.text("APPROVED BY", 140, finalY + 5);
-    doc.text("Managing Director", 140, finalY + 9);
+    doc.setFont('helvetica', 'bold');
+    doc.text("APPROVED BY", 210, finalY + 4);
+    doc.setFont('helvetica', 'normal');
+    doc.text("Managing Director / Executive Office", 210, finalY + 8);
 
-    doc.save(`Madigun_Damage_Summary_${startDateStr}_to_${endDateStr}.pdf`);
+    // Page numbers
+    const totalPages = (doc as any).internal.getNumberOfPages();
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
+      doc.setFontSize(7.5);
+      doc.setTextColor(140, 122, 107);
+      doc.text(
+        `Page ${i} of ${totalPages} • Madigun Hotel & Events • Property Damage Incident Audit Report`,
+        pageWidth / 2,
+        pageHeight - 6,
+        { align: 'center' }
+      );
+    }
+
+    const filenameCoverage = startDateStr && endDateStr ? `${startDateStr}_to_${endDateStr}` : 'All_Records';
+    doc.save(`Madigun_Damage_Summary_${filenameCoverage}.pdf`);
     setIsOverallReportModalOpen(false);
   };
 
@@ -1209,7 +1309,7 @@ export default function DamageReports({
                       {/* Damaged Item Name Input */}
                       <div>
                         <label className="block text-[11px] font-bold text-[#3E312C] mb-1">
-                          Item Name / Description <span className="text-rose-600">*</span>
+                          Item Name <span className="text-rose-600">*</span>
                         </label>
                         <input
                           type="text"
@@ -1418,10 +1518,10 @@ export default function DamageReports({
                 )}
               </div>
 
-              {/* Cause / Description */}
+              {/* Cause of Incident */}
               <div>
                 <label className="block text-xs font-bold text-[#3E312C] mb-1">
-                  Cause & Description of Damage Incident <span className="text-rose-600">*</span>
+                  Cause of Damage Incident <span className="text-rose-600">*</span>
                 </label>
                 <textarea
                   required
@@ -1497,12 +1597,13 @@ export default function DamageReports({
               {/* Timeframe Selector */}
               <div>
                 <label className="block text-xs font-bold text-[#3E312C] mb-1">Timeframe Period</label>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {[
                     { id: 'this_week', label: 'This Week' },
                     { id: 'this_month', label: 'This Month' },
                     { id: 'last_month', label: 'Last Month' },
-                    { id: 'custom', label: 'Custom Date Range' }
+                    { id: 'all_time', label: 'All Incidents' },
+                    { id: 'custom', label: 'Custom Range' }
                   ].map(tf => (
                     <button
                       key={tf.id}

@@ -86,30 +86,14 @@ export const getSectionName = (sec: InventorySection): string => {
     case 'INDUSTRIAL_EQUIPMENTS': return 'Industrial Equipments';
     case 'LUZON': return 'Luzon';
     case 'VISAYAS': return 'Visayas';
-    case 'MINDANAO': return 'Mindanao';
+    case 'MINDANAO':
+    case 'OLD_HR_OFFICE': return 'Old H.R Office';
     default: return sec;
   }
 };
 
-export const getSectionDescription = (sec: InventorySection): string => {
-  switch (sec) {
-    case 'KITCHEN': return 'KITCHEN BACK-OF-HOUSE INVENTORY AUDIT';
-    case 'ROOMS': return 'ROOMS DEPARTMENT INVENTORY AUDIT';
-    case 'HOUSEKEEPING': return 'HOUSEKEEPING SUPPLIES AUDIT';
-    case 'HOUSEKEEPING_EQUIPMENTS': return 'HOUSEKEEPING EQUIPMENTS AUDIT';
-    case 'HR_EQUIPMENTS': return 'H.R EQUIPMENTS AUDIT';
-    case 'FO_EQUIPMENTS': return 'F.O EQUIPMENTS AUDIT';
-    case 'FINANCE_EQUIPMENTS': return 'FINANCE EQUIPMENTS AUDIT';
-    case 'SECURITY_POST_EQUIPMENTS': return 'SECURITY POST EQUIPMENTS AUDIT';
-    case 'IT_EQUIPMENTS': return 'I.T EQUIPMENTS AUDIT';
-    case 'LINENS': return 'LINENS DEPARTMENT INVENTORY AUDIT';
-    case 'INDUSTRIAL_EQUIPMENTS': return 'INDUSTRIAL EQUIPMENTS AUDIT';
-    case 'LUZON': return 'LUZON REGION INVENTORY AUDIT';
-    case 'VISAYAS': return 'VISAYAS REGION INVENTORY AUDIT';
-    case 'MINDANAO': return 'MINDANAO REGION INVENTORY AUDIT';
-    default: return `${sec} AUDIT`;
-  }
-};
+export const getSectionDescription = (_sec: InventorySection): string => '';
+
 
 export const getSectionValuationHeader = (sec: InventorySection): string => {
   switch (sec) {
@@ -126,7 +110,8 @@ export const getSectionValuationHeader = (sec: InventorySection): string => {
     case 'INDUSTRIAL_EQUIPMENTS': return 'INDUSTRIAL EQUIPMENTS - VALUATION & PRICE BREAKDOWN';
     case 'LUZON': return 'LUZON - VALUATION & PRICE BREAKDOWN';
     case 'VISAYAS': return 'VISAYAS - VALUATION & PRICE BREAKDOWN';
-    case 'MINDANAO': return 'MINDANAO - VALUATION & PRICE BREAKDOWN';
+    case 'MINDANAO':
+    case 'OLD_HR_OFFICE': return 'OLD H.R OFFICE - VALUATION & PRICE BREAKDOWN';
     default: return `${sec} - VALUATION & PRICE BREAKDOWN`;
   }
 };
@@ -466,12 +451,10 @@ export default function Inventory({
       doc.setFont("helvetica", "normal");
       doc.setFontSize(8.5);
       doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
-      doc.text(getSectionDescription(sectionFilter), 15, 25);
-
       // Line under header
       doc.setDrawColor(primaryColor[0], primaryColor[1], primaryColor[2]);
       doc.setLineWidth(0.6);
-      doc.line(15, 28, 195, 28);
+      doc.line(15, 25, 195, 25);
 
       // Title
       doc.setFont("helvetica", "bold");
@@ -518,7 +501,7 @@ export default function Inventory({
       autoTable(doc, {
         startY: 47,
         margin: { left: 15, right: 15 },
-        head: [['Product Description', 'Category', 'System Stock', 'Actual Count', 'Supplier']],
+        head: [['Product / Item Name', 'Category', 'System Stock', 'Actual Count', 'Supplier']],
         body: tableBody,
         theme: 'striped',
         headStyles: {
@@ -672,7 +655,7 @@ export default function Inventory({
       autoTable(doc, {
         startY: 47,
         margin: { left: 15, right: 15 },
-        head: [['Product Description', 'Category', 'Current Stock', 'Unit Price (PHP)', 'Total Value (PHP)', 'Supplier']],
+        head: [['Product / Item Name', 'Category', 'Current Stock', 'Unit Price (PHP)', 'Total Value (PHP)', 'Supplier']],
         body: tableBody,
         theme: 'striped',
         headStyles: {
@@ -873,7 +856,7 @@ export default function Inventory({
       autoTable(doc, {
         startY: 80,
         margin: { left: 15, right: 15 },
-        head: [['Item Description', 'Category', 'Qty Transferred', 'Unit Cost', 'Total Value', 'From Section', 'Destination']],
+        head: [['Item Name', 'Category', 'Qty Transferred', 'Unit Cost', 'Total Value', 'From Section', 'Destination']],
         body: tableBody,
         theme: 'striped',
         headStyles: {
@@ -1882,7 +1865,7 @@ export default function Inventory({
                     <option value="INDUSTRIAL_EQUIPMENTS">Industrial Equipments</option>
                     <option value="LUZON">Luzon</option>
                     <option value="VISAYAS">Visayas</option>
-                    <option value="MINDANAO">Mindanao</option>
+                    <option value="MINDANAO">Old H.R Office</option>
                   </select>
                 </div>
 
@@ -2501,7 +2484,7 @@ export default function Inventory({
             { value: 'INDUSTRIAL_EQUIPMENTS', label: 'Industrial Equipments', icon: <Building2 className="h-4.5 w-4.5" /> },
             { value: 'LUZON', label: 'Luzon', icon: <Layers className="h-4.5 w-4.5" /> },
             { value: 'VISAYAS', label: 'Visayas', icon: <Layers className="h-4.5 w-4.5" /> },
-            { value: 'MINDANAO', label: 'Mindanao', icon: <Layers className="h-4.5 w-4.5" /> },
+            { value: 'MINDANAO', label: 'Old H.R Office', icon: <Layers className="h-4.5 w-4.5" /> },
           ].map((sec) => (
             <button
               key={sec.value}
@@ -4062,7 +4045,6 @@ export default function Inventory({
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '3px solid #3E312C', paddingBottom: '15px', marginBottom: '20px' }}>
             <div>
               <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 'bold', color: '#3E312C' }}>MADIGUN HOTEL AND EVENTS</h1>
-              <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: '#8C7A6B', textTransform: 'uppercase', letterSpacing: '1px' }}>{getSectionDescription(sectionFilter)}</p>
             </div>
             <div style={{ textAlign: 'right' }}>
               <h2 style={{ margin: 0, fontSize: '16px', color: '#3E312C', fontWeight: 'bold' }}>PHYSICAL INVENTORY COUNT SHEET</h2>
@@ -4078,7 +4060,7 @@ export default function Inventory({
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', marginBottom: '30px' }}>
             <thead>
               <tr style={{ backgroundColor: '#FAF9F5', textAlign: 'left', borderBottom: '1.5px solid #3E312C', color: '#3E312C' }}>
-                <th style={{ padding: '10px 8px', width: '35%' }}>Product Description</th>
+                <th style={{ padding: '10px 8px', width: '35%' }}>Product / Item Name</th>
                 <th style={{ padding: '10px 8px', width: '15%' }}>Category</th>
                 <th style={{ padding: '10px 8px', textAlign: 'right', width: '15%' }}>System Stock</th>
                 <th style={{ padding: '10px 8px', textAlign: 'center', width: '20%' }}>Actual Count</th>
@@ -4291,7 +4273,7 @@ export default function Inventory({
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-[#8C7A6B] uppercase tracking-wider mb-1">Notes / Description</label>
+                <label className="block text-xs font-bold text-[#8C7A6B] uppercase tracking-wider mb-1">Notes</label>
                 <textarea
                   rows={2}
                   value={editingRoom.notes || ''}

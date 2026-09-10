@@ -29,7 +29,8 @@ export type InventorySection =
   | 'INDUSTRIAL_EQUIPMENTS'
   | 'LUZON'
   | 'VISAYAS'
-  | 'MINDANAO';
+  | 'MINDANAO'
+  | 'OLD_HR_OFFICE';
 
 export interface InventoryItem {
   id: string;
@@ -53,6 +54,8 @@ export interface RequisitionItem {
   quantity: number;
   unit: string;
   unitCost: number;
+  actualUnitCost?: number; // Actual purchased price when restocked/bought
+  requestedUnitCost?: number; // Original estimated PR price
   targetTab?: string;
   allocatedLocation?: string;
   category?: string;
@@ -89,6 +92,10 @@ export interface Requisition {
   preparerSignature?: string;
   orderedAt?: string;
   receivedAt?: string;
+  receivedBy?: string;
+  receivedByName?: string;
+  receivedItems?: RequisitionItem[];
+  receivedNotes?: string;
   rejectedAt?: string;
   rejectedBy?: string;
   rejectedByName?: string;
