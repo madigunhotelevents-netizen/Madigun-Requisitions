@@ -28,7 +28,6 @@ export type InventorySection =
   | 'LINENS'
   | 'INDUSTRIAL_EQUIPMENTS'
   | 'LUZON'
-  | 'VISAYAS'
   | 'MINDANAO'
   | 'OLD_HR_OFFICE';
 

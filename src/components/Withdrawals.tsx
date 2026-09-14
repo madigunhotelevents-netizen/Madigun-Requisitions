@@ -30,7 +30,14 @@ import {
   Store,
   DollarSign,
   Lock,
-  Monitor
+  Monitor,
+  FileSpreadsheet,
+  Download,
+  Search,
+  PackageCheck,
+  Package,
+  Eye,
+  Filter
 } from 'lucide-react';
 import { Withdrawal, InventoryItem, User as UserType, WithdrawalItem, WithdrawalStatus, InventorySection } from '../types';
 
@@ -60,7 +67,6 @@ const SECTION_CONFIG: Record<string, { label: string; icon: React.FC<{ className
   LINENS: { label: 'Linens & Towels', icon: Shirt },
   INDUSTRIAL_EQUIPMENTS: { label: 'Industrial Equipments', icon: Building },
   LUZON: { label: 'Luzon', icon: Layers },
-  VISAYAS: { label: 'Visayas', icon: Layers },
   MINDANAO: { label: 'Old H.R Office', icon: Layers },
   OLD_HR_OFFICE: { label: 'Old H.R Office', icon: Layers }
 };
@@ -87,6 +93,15 @@ export default function Withdrawals({
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [withdrawalToDelete, setWithdrawalToDelete] = useState<Withdrawal | null>(null);
+
+  // Withdrawal Report Generator states
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [reportSearchTerm, setReportSearchTerm] = useState('');
+  const [reportSectionFilter, setReportSectionFilter] = useState('ALL');
+  const [reportStatusFilter, setReportStatusFilter] = useState<'completed' | 'all' | 'pending'>('completed');
+  const [reportDateRange, setReportDateRange] = useState<'all' | '7days' | '30days' | 'this_month'>('all');
+  const [reportViewMode, setReportViewMode] = useState<'items' | 'slips'>('items');
+  const [expandedReportSlipId, setExpandedReportSlipId] = useState<string | null>(null);
 
   // Source section / tab selector state
   const [selectedSourceTab, setSelectedSourceTab] = useState<string>('ALL');
@@ -522,6 +537,355 @@ export default function Withdrawals({
     }
   };
 
+  // --- WITHDRAWAL REPORT GENERATOR LOGIC ---
+
+  // Filtered withdrawals for the report based on status and date range
+  const reportWithdrawals = useMemo(() => {
+    return withdrawals.filter(wd => {
+      // Status filter
+      if (reportStatusFilter === 'completed' && wd.status !== 'completed') return false;
+      if (reportStatusFilter === 'pending' && wd.status !== 'pending' && wd.status !== 'approved') return false;
+
+      // Date range filter
+      if (reportDateRange !== 'all') {
+        const slipTime = new Date(wd.createdAt).getTime();
+        const now = Date.now();
+        if (reportDateRange === '7days' && (now - slipTime > 7 * 24 * 60 * 60 * 1000)) return false;
+        if (reportDateRange === '30days' && (now - slipTime > 30 * 24 * 60 * 60 * 1000)) return false;
+        if (reportDateRange === 'this_month') {
+          const slipDate = new Date(wd.createdAt);
+          const curDate = new Date();
+          if (slipDate.getMonth() !== curDate.getMonth() || slipDate.getFullYear() !== curDate.getFullYear()) return false;
+        }
+      }
+      return true;
+    });
+  }, [withdrawals, reportStatusFilter, reportDateRange]);
+
+  // Aggregated withdrawn items and overall value across all matching withdrawals
+  const aggregatedWithdrawnItems = useMemo(() => {
+    const itemMap = new Map<string, {
+      itemId: string;
+      itemName: string;
+      section: string;
+      sectionLabel: string;
+      category: string;
+      unit: string;
+      unitCost: number;
+      totalQuantityWithdrawn: number;
+      overallValue: number;
+      slipCount: number;
+      slipNumbers: string[];
+      lastDisbursedDate: string;
+    }>();
+
+    reportWithdrawals.forEach(wd => {
+      wd.items.forEach(item => {
+        // Resolve item from inventory for unitCost and section
+        const liveItem = inventory.find(i => 
+          i.id === item.itemId || 
+          i.name.trim().toLowerCase() === item.itemName.trim().toLowerCase()
+        );
+        const section = liveItem?.section || 'KITCHEN';
+        const sectionLabel = getSectionLabel(section);
+        const category = liveItem?.category || 'General';
+        const unitCost = liveItem?.unitCost || 0;
+        const lineValue = item.quantity * unitCost;
+
+        const key = item.itemId || item.itemName.trim().toLowerCase();
+        const existing = itemMap.get(key);
+
+        if (existing) {
+          existing.totalQuantityWithdrawn += item.quantity;
+          existing.overallValue += lineValue;
+          if (!existing.slipNumbers.includes(wd.withdrawalNumber)) {
+            existing.slipNumbers.push(wd.withdrawalNumber);
+            existing.slipCount += 1;
+          }
+          if (new Date(wd.createdAt).getTime() > new Date(existing.lastDisbursedDate).getTime()) {
+            existing.lastDisbursedDate = wd.createdAt;
+          }
+        } else {
+          itemMap.set(key, {
+            itemId: item.itemId,
+            itemName: item.itemName,
+            section,
+            sectionLabel,
+            category,
+            unit: item.unit,
+            unitCost,
+            totalQuantityWithdrawn: item.quantity,
+            overallValue: lineValue,
+            slipCount: 1,
+            slipNumbers: [wd.withdrawalNumber],
+            lastDisbursedDate: wd.createdAt
+          });
+        }
+      });
+    });
+
+    return Array.from(itemMap.values()).sort((a, b) => {
+      // Automatically sorted highest to lowest quantity disbursed
+      if (b.totalQuantityWithdrawn !== a.totalQuantityWithdrawn) {
+        return b.totalQuantityWithdrawn - a.totalQuantityWithdrawn;
+      }
+      return b.overallValue - a.overallValue;
+    });
+  }, [reportWithdrawals, inventory]);
+
+  // Filtered withdrawn items by search and section (preserves highest-to-lowest quantity ordering)
+  const filteredWithdrawnItems = useMemo(() => {
+    return aggregatedWithdrawnItems.filter(item => {
+      if (reportSectionFilter !== 'ALL' && item.section !== reportSectionFilter) return false;
+      if (!reportSearchTerm.trim()) return true;
+      const q = reportSearchTerm.toLowerCase();
+      return (
+        item.itemName.toLowerCase().includes(q) ||
+        item.sectionLabel.toLowerCase().includes(q) ||
+        item.category.toLowerCase().includes(q) ||
+        item.slipNumbers.some(s => s.toLowerCase().includes(q))
+      );
+    });
+  }, [aggregatedWithdrawnItems, reportSectionFilter, reportSearchTerm]);
+
+  // Detailed Slips with individual item valuations
+  const slipsWithValuation = useMemo(() => {
+    return reportWithdrawals.map(wd => {
+      let slipTotalValuation = 0;
+      let slipTotalUnits = 0;
+      const itemDetails = wd.items.map(item => {
+        const liveItem = inventory.find(i => 
+          i.id === item.itemId || 
+          i.name.trim().toLowerCase() === item.itemName.trim().toLowerCase()
+        );
+        const unitCost = liveItem?.unitCost || 0;
+        const lineVal = item.quantity * unitCost;
+        slipTotalValuation += lineVal;
+        slipTotalUnits += item.quantity;
+        return {
+          ...item,
+          unitCost,
+          lineVal,
+          section: liveItem?.section || 'KITCHEN',
+          sectionLabel: getSectionLabel(liveItem?.section)
+        };
+      });
+
+      // Sort items within each slip highest to lowest quantity as well
+      itemDetails.sort((a, b) => b.quantity - a.quantity);
+
+      return {
+        ...wd,
+        slipTotalValuation,
+        slipTotalUnits,
+        itemDetails
+      };
+    }).sort((a, b) => b.slipTotalUnits - a.slipTotalUnits);
+  }, [reportWithdrawals, inventory]);
+
+  // Filtered slips for the "By Withdrawal Slip" report view
+  const filteredReportSlips = useMemo(() => {
+    return slipsWithValuation.filter(wd => {
+      if (reportSectionFilter !== 'ALL') {
+        const hasSectionItem = wd.itemDetails.some(it => it.section === reportSectionFilter);
+        if (!hasSectionItem) return false;
+      }
+      if (!reportSearchTerm.trim()) return true;
+      const q = reportSearchTerm.toLowerCase();
+      return (
+        wd.withdrawalNumber.toLowerCase().includes(q) ||
+        wd.createdByName.toLowerCase().includes(q) ||
+        wd.purpose.toLowerCase().includes(q) ||
+        wd.itemDetails.some(it => it.itemName.toLowerCase().includes(q))
+      );
+    });
+  }, [slipsWithValuation, reportSectionFilter, reportSearchTerm]);
+
+  // Report Summary KPIs
+  const withdrawalReportSummary = useMemo(() => {
+    const totalSlips = reportWithdrawals.length;
+    const totalUniqueItems = aggregatedWithdrawnItems.length;
+    const totalUnitsWithdrawn = aggregatedWithdrawnItems.reduce((sum, it) => sum + it.totalQuantityWithdrawn, 0);
+    const overallWithdrawnValue = aggregatedWithdrawnItems.reduce((sum, it) => sum + it.overallValue, 0);
+
+    return {
+      totalSlips,
+      totalUniqueItems,
+      totalUnitsWithdrawn,
+      overallWithdrawnValue
+    };
+  }, [reportWithdrawals, aggregatedWithdrawnItems]);
+
+  const handleExportWithdrawalReportPDF = () => {
+    try {
+      const doc = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      });
+
+      const primaryColor = [62, 49, 44]; // #3E312C
+      const secondaryColor = [140, 122, 107]; // #8C7A6B
+
+      // Header
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(18);
+      doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.text("MADIGUN HOTEL AND EVENTS", 15, 20);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.5);
+      doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
+      doc.text("INVENTORY WITHDRAWAL CONTROL & DISBURSEMENT VALUATION REPORT", 15, 25);
+
+      // Line under header
+      doc.setDrawColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.setLineWidth(0.6);
+      doc.line(15, 28, 195, 28);
+
+      // Title
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(13);
+      doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.text("WITHDRAWN ITEMS & OVERALL VALUATION AUDIT REPORT", 15, 36);
+
+      // Subtitle
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      const statusLabel = reportStatusFilter === 'completed' ? 'Completed & Disbursed Slips' : reportStatusFilter === 'pending' ? 'Pending / Approved Requests' : 'All Recorded Slips';
+      doc.text(`Scope: ${statusLabel} (${withdrawalReportSummary.totalSlips} Slips • ${filteredWithdrawnItems.length} Products | Sorted: Highest to Lowest Qty Disbursed) | Generated: ${new Date().toLocaleDateString('en-US', { dateStyle: 'medium' })}`, 15, 41);
+      doc.text(`Audited By: ${currentUser.name} (${currentUser.role.toUpperCase()})`, 195, 41, { align: 'right' });
+
+      // AutoTable
+      const tableBody = filteredWithdrawnItems.map((item, idx) => {
+        const share = withdrawalReportSummary.overallWithdrawnValue > 0
+          ? ((item.overallValue / withdrawalReportSummary.overallWithdrawnValue) * 100).toFixed(1) + '%'
+          : '0.0%';
+        return [
+          String(idx + 1),
+          item.itemName,
+          item.sectionLabel,
+          `${item.totalQuantityWithdrawn.toLocaleString()} ${item.unit}`,
+          `PHP ${item.unitCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          `PHP ${item.overallValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          share
+        ];
+      });
+
+      const filteredTotalUnits = filteredWithdrawnItems.reduce((sum, it) => sum + it.totalQuantityWithdrawn, 0);
+      const filteredTotalValue = filteredWithdrawnItems.reduce((sum, it) => sum + it.overallValue, 0);
+
+      autoTable(doc, {
+        startY: 46,
+        margin: { left: 15, right: 15 },
+        head: [['#', 'Withdrawn Item Name', 'Source Inventory Tab', 'Total Qty Disbursed', 'Unit Cost (PHP)', 'Overall Value (PHP)', '% Value Share']],
+        body: tableBody,
+        theme: 'striped',
+        headStyles: {
+          fillColor: [62, 49, 44],
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          fontSize: 8.5
+        },
+        columnStyles: {
+          0: { cellWidth: 10, halign: 'center' },
+          1: { cellWidth: 55 },
+          2: { cellWidth: 40 },
+          3: { cellWidth: 28, halign: 'right' },
+          4: { cellWidth: 25, halign: 'right' },
+          5: { cellWidth: 32, halign: 'right', fontStyle: 'bold' },
+          6: { cellWidth: 15, halign: 'right' }
+        },
+        foot: [[
+          { content: 'OVERALL TOTAL (WITHDRAWN ITEMS):', colSpan: 3, styles: { halign: 'right', fontStyle: 'bold', fontSize: 9 } },
+          { content: `${filteredTotalUnits.toLocaleString()} units`, styles: { halign: 'right', fontStyle: 'bold', fontSize: 9 } },
+          { content: '-', styles: { halign: 'center', fontStyle: 'bold', fontSize: 9 } },
+          { content: `PHP ${filteredTotalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, styles: { halign: 'right', fontStyle: 'bold', fontSize: 9 } },
+          { content: '100.0%', styles: { halign: 'right', fontStyle: 'bold', fontSize: 9 } }
+        ]],
+        footStyles: {
+          fillColor: [244, 242, 235],
+          textColor: [62, 49, 44]
+        },
+        styles: {
+          fontSize: 8,
+          cellPadding: 2.5
+        }
+      });
+
+      // Signatures
+      let finalY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 22 : 200;
+      if (finalY > 250) {
+        doc.addPage();
+        finalY = 35;
+      }
+
+      doc.setDrawColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.setLineWidth(0.25);
+
+      // Left signature: Property Custodian
+      doc.line(25, finalY, 85, finalY);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.text(currentUser.name, 55, finalY + 4, { align: 'center' });
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
+      doc.text("PREPARED BY / PROPERTY CUSTODIAN", 55, finalY + 8, { align: 'center' });
+
+      // Right signature: General Manager / Auditor
+      doc.line(125, finalY, 185, finalY);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.text("(Signature over Printed Name)", 155, finalY + 4, { align: 'center' });
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
+      doc.text("HOTEL GENERAL MANAGER / AUDITOR", 155, finalY + 8, { align: 'center' });
+
+      doc.save(`Withdrawn_Items_Valuation_Report_${new Date().toISOString().split('T')[0]}.pdf`);
+    } catch (err) {
+      console.error("PDF Withdrawal Report error:", err);
+      window.print();
+    }
+  };
+
+  const handleExportWithdrawalReportCSV = () => {
+    const lines = [
+      `"MADIGUN HOTEL AND EVENTS - CONSOLIDATED WITHDRAWN ITEMS & OVERALL VALUE REPORT"`,
+      `"Scope:","${reportStatusFilter === 'completed' ? 'Completed Disbursed Slips' : 'All Recorded Slips'}"`,
+      `"Generated Date:","${new Date().toLocaleDateString('en-US')}"`,
+      `"Audited By:","${currentUser.name} (${currentUser.role})"`,
+      `"Total Slips Evaluated:","${withdrawalReportSummary.totalSlips}"`,
+      `"Overall Total Value:","PHP ${withdrawalReportSummary.overallWithdrawnValue.toFixed(2)}"`,
+      `""`,
+      `"Item Name","Source Department Tab","Category","Total Quantity Disbursed","Unit","Unit Cost (PHP)","Overall Value (PHP)","Value Share (%)","Slip References"`
+    ];
+
+    filteredWithdrawnItems.forEach(item => {
+      const share = withdrawalReportSummary.overallWithdrawnValue > 0
+        ? ((item.overallValue / withdrawalReportSummary.overallWithdrawnValue) * 100).toFixed(1)
+        : '0.0';
+      const slips = item.slipNumbers.join('; ');
+      lines.push(`"${item.itemName.replace(/"/g, '""')}","${item.sectionLabel}","${item.category}",${item.totalQuantityWithdrawn},"${item.unit}",${item.unitCost.toFixed(2)},${item.overallValue.toFixed(2)},${share}%,"${slips}"`);
+    });
+
+    const filteredTotalUnits = filteredWithdrawnItems.reduce((sum, it) => sum + it.totalQuantityWithdrawn, 0);
+    const filteredTotalValue = filteredWithdrawnItems.reduce((sum, it) => sum + it.overallValue, 0);
+
+    lines.push(`"OVERALL TOTAL","","","${filteredTotalUnits}","Units","","${filteredTotalValue.toFixed(2)}","100%",""`);
+
+    const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + encodeURIComponent(lines.join("\n"));
+    const link = document.createElement("a");
+    link.setAttribute("href", csvContent);
+    link.setAttribute("download", `Withdrawn_Items_Valuation_Report_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="space-y-6" id="withdrawals-tab-panel">
       {/* Welcome Banner */}
@@ -531,9 +895,22 @@ export default function Withdrawals({
             <BedDouble className="h-8 w-8 text-[#8C7A6B]" />
             Withdrawal Slip
           </h2>
+          <p className="text-xs text-[#8C7A6B] mt-1">
+            Requisition, stock disbursement, and inventory withdrawal tracking across all hotel departments.
+          </p>
         </div>
 
-        <div>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setIsReportModalOpen(true)}
+            className="flex items-center gap-2 bg-[#8C7355] hover:bg-[#745E44] text-white font-semibold text-xs px-5 py-3.5 rounded-full transition-all shadow-xs cursor-pointer"
+            id="withdrawal-report-generator-btn"
+            title="Consolidated report of all withdrawn items and overall value"
+          >
+            <FileSpreadsheet className="h-4 w-4 text-white" />
+            <span>Report Generator</span>
+          </button>
           <button
             onClick={() => setIsCreating(!isCreating)}
             className="flex items-center gap-1.5 bg-[#3E312C] hover:bg-[#2C211F] text-white font-semibold text-xs px-5 py-3.5 rounded-full transition-all shadow-xs cursor-pointer"
@@ -961,9 +1338,22 @@ export default function Withdrawals({
       ) : (
         /* List active and previous withdrawal slips */
         <div className="bg-white border border-[#E6E4DD] rounded-[32px] overflow-hidden shadow-sm" id="withdrawals-list">
-          <div className="p-5 border-b border-[#F0EFE9] bg-[#FAF9F5] flex justify-between items-center">
-            <h3 className="font-serif text-lg text-[#3E312C] font-bold">Withdrawal Slips Log</h3>
-            <span className="text-xs text-[#8C7A6B] font-mono">Total Logged: {withdrawals.length}</span>
+          <div className="p-4 sm:p-5 border-b border-[#F0EFE9] bg-[#FAF9F5] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+            <div className="flex items-center gap-3">
+              <h3 className="font-serif text-lg text-[#3E312C] font-bold">Withdrawal Slips Log</h3>
+              <span className="text-xs text-[#8C7A6B] font-mono bg-white px-2.5 py-1 rounded-full border border-[#EBE6DD]">
+                Total Logged: {withdrawals.length}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsReportModalOpen(true)}
+              className="flex items-center gap-2 bg-white hover:bg-[#FAF9F5] text-[#3E312C] border border-[#EBE6DD] font-semibold text-xs px-4 py-2 rounded-full transition-all shadow-xs cursor-pointer"
+              id="log-toolbar-report-btn"
+            >
+              <FileSpreadsheet className="h-4 w-4 text-[#8C7A6B]" />
+              <span>Withdrawn Items Report ({aggregatedWithdrawnItems.length} Products • ₱{withdrawalReportSummary.overallWithdrawnValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</span>
+            </button>
           </div>
 
           <div className="divide-y divide-[#F0EFE9]" id="withdrawals-records-container">
@@ -1136,6 +1526,459 @@ export default function Withdrawals({
               >
                 Delete Slip
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* WITHDRAWAL REPORT GENERATOR MODAL */}
+      {isReportModalOpen && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5"
+          id="withdrawal-report-modal"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="bg-white border border-[#E6E4DD] rounded-[28px] sm:rounded-[32px] max-w-5xl w-full shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Top Header */}
+            <div className="p-5 sm:p-6 border-b border-[#F0EFE9] bg-[#FAF9F5] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div className="flex items-start sm:items-center gap-3">
+                <div className="p-2.5 bg-[#3E312C] text-white rounded-2xl shadow-xs">
+                  <FileSpreadsheet className="h-6 w-6 text-[#FAF9F5]" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="font-serif text-xl sm:text-2xl font-bold text-[#3E312C]">
+                      Withdrawn Items & Overall Value Report
+                    </h3>
+                    <span className="text-[10px] font-mono font-bold bg-[#FAF9F5] border border-[#EBE6DD] px-2.5 py-0.5 rounded-full text-[#8C7A6B] uppercase">
+                      Highest to Lowest Qty Disbursed
+                    </span>
+                  </div>
+                  <p className="text-xs text-[#8C7A6B] mt-0.5">
+                    Consolidated valuation of all inventory items withdrawn across hotel departments, automatically sorted by highest to lowest quantity disbursed.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 self-end sm:self-center">
+                <button
+                  type="button"
+                  onClick={handleExportWithdrawalReportPDF}
+                  className="flex items-center gap-1.5 bg-[#3E312C] hover:bg-[#2C211F] text-white text-xs font-semibold px-4 py-2.5 rounded-full transition-all shadow-xs cursor-pointer"
+                  id="modal-download-pdf-btn"
+                  title="Download printable PDF valuation report"
+                >
+                  <Printer className="h-3.5 w-3.5 text-white" />
+                  <span>Download PDF</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExportWithdrawalReportCSV}
+                  className="flex items-center gap-1.5 bg-white hover:bg-[#FAF9F5] text-[#3E312C] border border-[#EBE6DD] text-xs font-semibold px-4 py-2.5 rounded-full transition-all shadow-xs cursor-pointer"
+                  id="modal-export-csv-btn"
+                  title="Export spreadsheet CSV"
+                >
+                  <Download className="h-3.5 w-3.5 text-[#8C7A6B]" />
+                  <span>Export CSV</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsReportModalOpen(false)}
+                  className="p-2 rounded-full hover:bg-[#EBE6DD] text-[#8C7A6B] hover:text-[#3E312C] transition-colors cursor-pointer"
+                  aria-label="Close modal"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Scrollable Modal Content */}
+            <div className="overflow-y-auto p-5 sm:p-6 space-y-6 flex-1 bg-white">
+              {/* 4 Summary KPI Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5" id="withdrawal-report-kpis">
+                {/* Overall Withdrawn Value */}
+                <div className="bg-[#FAF9F5] border border-[#EBE6DD] rounded-2xl p-4 flex flex-col justify-between">
+                  <div className="flex items-center justify-between text-[#8C7A6B] text-xs font-medium mb-1">
+                    <span>Overall Withdrawn Value</span>
+                    <DollarSign className="h-4 w-4 text-[#8C7A6B]" />
+                  </div>
+                  <div className="font-serif text-2xl font-bold text-[#3E312C] tracking-tight">
+                    ₱{withdrawalReportSummary.overallWithdrawnValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <div className="text-[11px] text-[#8C7A6B] mt-1 flex items-center gap-1 font-mono">
+                    Total financial cost of disbursed stock
+                  </div>
+                </div>
+
+                {/* Total Units Disbursed */}
+                <div className="bg-[#FAF9F5] border border-[#EBE6DD] rounded-2xl p-4 flex flex-col justify-between">
+                  <div className="flex items-center justify-between text-[#8C7A6B] text-xs font-medium mb-1">
+                    <span>Total Disbursed Qty</span>
+                    <PackageCheck className="h-4 w-4 text-[#8C7A6B]" />
+                  </div>
+                  <div className="font-serif text-2xl font-bold text-[#3E312C] tracking-tight">
+                    {withdrawalReportSummary.totalUnitsWithdrawn.toLocaleString()}
+                  </div>
+                  <div className="text-[11px] text-[#8C7A6B] mt-1 flex items-center gap-1">
+                    Total cumulative item units released
+                  </div>
+                </div>
+
+                {/* Unique Item SKUs */}
+                <div className="bg-[#FAF9F5] border border-[#EBE6DD] rounded-2xl p-4 flex flex-col justify-between">
+                  <div className="flex items-center justify-between text-[#8C7A6B] text-xs font-medium mb-1">
+                    <span>Distinct Products (SKUs)</span>
+                    <Package className="h-4 w-4 text-[#8C7A6B]" />
+                  </div>
+                  <div className="font-serif text-2xl font-bold text-[#3E312C] tracking-tight">
+                    {withdrawalReportSummary.totalUniqueItems}
+                  </div>
+                  <div className="text-[11px] text-[#8C7A6B] mt-1 flex items-center gap-1">
+                    Unique catalog items withdrawn
+                  </div>
+                </div>
+
+                {/* Processed Slips */}
+                <div className="bg-[#FAF9F5] border border-[#EBE6DD] rounded-2xl p-4 flex flex-col justify-between">
+                  <div className="flex items-center justify-between text-[#8C7A6B] text-xs font-medium mb-1">
+                    <span>Evaluated Slips</span>
+                    <ClipboardList className="h-4 w-4 text-[#8C7A6B]" />
+                  </div>
+                  <div className="font-serif text-2xl font-bold text-[#3E312C] tracking-tight">
+                    {withdrawalReportSummary.totalSlips}
+                  </div>
+                  <div className="text-[11px] text-[#8C7A6B] mt-1 flex items-center gap-1 capitalize">
+                    {reportStatusFilter === 'completed' ? 'Completed & Disbursed' : 'All Recorded Slips'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Filters and Controls Toolbar */}
+              <div className="bg-[#FAF9F5] border border-[#EBE6DD] rounded-2xl p-3.5 space-y-3">
+                <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+                  {/* Search Bar */}
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[#8C7A6B]" />
+                    <input
+                      type="text"
+                      placeholder="Search by item name, department, or slip#..."
+                      value={reportSearchTerm}
+                      onChange={(e) => setReportSearchTerm(e.target.value)}
+                      className="w-full pl-9 pr-8 py-2 bg-white border border-[#EBE6DD] rounded-xl text-xs text-[#3E312C] placeholder-[#8C7A6B]/60 focus:outline-hidden focus:border-[#3E312C]"
+                    />
+                    {reportSearchTerm && (
+                      <button
+                        type="button"
+                        onClick={() => setReportSearchTerm('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#8C7A6B] hover:text-[#3E312C] text-xs"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Department / Section Tab Selector */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs text-[#8C7A6B] font-medium shrink-0">Source Dept:</span>
+                    <select
+                      value={reportSectionFilter}
+                      onChange={(e) => setReportSectionFilter(e.target.value)}
+                      className="bg-white border border-[#EBE6DD] text-xs text-[#3E312C] rounded-xl px-3 py-2 focus:outline-hidden focus:border-[#3E312C] cursor-pointer"
+                    >
+                      <option value="ALL">All Inventory Tabs</option>
+                      {Object.entries(SECTION_CONFIG)
+                        .filter(([sec]) => sec !== 'ALL')
+                        .map(([sec, cfg]) => (
+                          <option key={sec} value={sec}>
+                            {cfg.label}
+                          </option>
+                        ))}
+                    </select>
+
+                    {/* Status Filter */}
+                    <select
+                      value={reportStatusFilter}
+                      onChange={(e) => setReportStatusFilter(e.target.value as any)}
+                      className="bg-white border border-[#EBE6DD] text-xs text-[#3E312C] rounded-xl px-3 py-2 focus:outline-hidden focus:border-[#3E312C] cursor-pointer"
+                    >
+                      <option value="completed">Completed / Disbursed Only</option>
+                      <option value="all">All Slips (incl. Pending / Draft)</option>
+                      <option value="pending">Pending & Approved</option>
+                    </select>
+
+                    {/* Timeframe Filter */}
+                    <select
+                      value={reportDateRange}
+                      onChange={(e) => setReportDateRange(e.target.value as any)}
+                      className="bg-white border border-[#EBE6DD] text-xs text-[#3E312C] rounded-xl px-3 py-2 focus:outline-hidden focus:border-[#3E312C] cursor-pointer"
+                    >
+                      <option value="all">All Time</option>
+                      <option value="this_month">This Month</option>
+                      <option value="30days">Last 30 Days</option>
+                      <option value="7days">Last 7 Days</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* View Mode Switcher */}
+                <div className="flex items-center justify-between pt-1 border-t border-[#EBE6DD]/60 flex-wrap gap-2">
+                  <div className="flex items-center gap-1.5 bg-white border border-[#EBE6DD] p-1 rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => setReportViewMode('items')}
+                      className={`text-xs px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${
+                        reportViewMode === 'items'
+                          ? 'bg-[#3E312C] text-white shadow-xs'
+                          : 'text-[#8C7A6B] hover:text-[#3E312C]'
+                      }`}
+                    >
+                      Itemized SKUs ({filteredWithdrawnItems.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReportViewMode('slips')}
+                      className={`text-xs px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${
+                        reportViewMode === 'slips'
+                          ? 'bg-[#3E312C] text-white shadow-xs'
+                          : 'text-[#8C7A6B] hover:text-[#3E312C]'
+                      }`}
+                    >
+                      By Withdrawal Slip ({filteredReportSlips.length})
+                    </button>
+                  </div>
+
+                  <div className="text-[11px] text-[#8C7A6B] font-mono">
+                    Showing {reportViewMode === 'items' ? filteredWithdrawnItems.length : filteredReportSlips.length} records matching criteria
+                  </div>
+                </div>
+              </div>
+
+              {/* VIEW MODE 1: Itemized Products Table */}
+              {reportViewMode === 'items' && (
+                <div className="border border-[#E6E4DD] rounded-2xl overflow-hidden shadow-xs">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-[#FAF9F5] text-[#8C7A6B] border-b border-[#E6E4DD]">
+                          <th className="py-3 px-3.5 text-center font-medium w-12">#</th>
+                          <th className="py-3 px-3.5 font-medium">Withdrawn Item Name</th>
+                          <th className="py-3 px-3.5 font-medium">Source Department Tab</th>
+                          <th className="py-3 px-3.5 text-right font-medium">
+                            <span className="inline-flex items-center gap-1 font-bold text-[#3E312C]">
+                              Total Qty Disbursed
+                              <span className="text-[10px] bg-[#3E312C] text-white px-1.5 py-0.5 rounded font-mono">↓ High-Low</span>
+                            </span>
+                          </th>
+                          <th className="py-3 px-3.5 text-right font-medium">Unit Cost</th>
+                          <th className="py-3 px-3.5 text-right font-medium">Overall Value</th>
+                          <th className="py-3 px-3.5 text-center font-medium">Slip References</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#F0EFE9] text-[#3E312C]">
+                        {filteredWithdrawnItems.length > 0 ? (
+                          filteredWithdrawnItems.map((item, idx) => {
+                            const share = withdrawalReportSummary.overallWithdrawnValue > 0
+                              ? ((item.overallValue / withdrawalReportSummary.overallWithdrawnValue) * 100).toFixed(1)
+                              : '0.0';
+
+                            return (
+                              <tr key={`${item.itemId}-${idx}`} className="hover:bg-[#FAF9F5]/60 transition-colors">
+                                <td className="py-3 px-3.5 text-center font-mono text-[#8C7A6B] text-[11px]">
+                                  {idx + 1}
+                                </td>
+                                <td className="py-3 px-3.5">
+                                  <div className="font-semibold text-[#3E312C]">{item.itemName}</div>
+                                  <span className="text-[10px] text-[#8C7A6B] uppercase font-mono">{item.category}</span>
+                                </td>
+                                <td className="py-3 px-3.5">
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-[#FAF9F5] border border-[#EBE6DD] text-[#3E312C]">
+                                    {item.sectionLabel}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-3.5 text-right font-bold text-[#3E312C]">
+                                  {item.totalQuantityWithdrawn.toLocaleString()} <span className="font-normal text-[#8C7A6B] text-[11px]">{item.unit}</span>
+                                </td>
+                                <td className="py-3 px-3.5 text-right font-mono text-[#8C7A6B]">
+                                  ₱{item.unitCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </td>
+                                <td className="py-3 px-3.5 text-right">
+                                  <div className="font-bold text-[#3E312C] font-mono">
+                                    ₱{item.overallValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </div>
+                                  <span className="text-[10px] text-[#8C7A6B] font-mono">({share}% of total)</span>
+                                </td>
+                                <td className="py-3 px-3.5 text-center">
+                                  <div className="flex flex-wrap gap-1 justify-center max-w-xs mx-auto">
+                                    {item.slipNumbers.map((sNum, sIdx) => (
+                                      <span 
+                                        key={sIdx} 
+                                        className="text-[10px] font-mono font-medium bg-white border border-[#EBE6DD] px-1.5 py-0.5 rounded text-[#8C7A6B]"
+                                        title={`Logged in ${sNum}`}
+                                      >
+                                        {sNum}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        ) : (
+                          <tr>
+                            <td colSpan={7} className="py-12 text-center text-[#8C7A6B]">
+                              <AlertCircle className="h-8 w-8 mx-auto text-[#8C7A6B]/50 mb-2" />
+                              <p className="font-semibold text-sm">No withdrawn items found</p>
+                              <p className="text-xs text-[#8C7A6B]/80 mt-0.5">
+                                Try adjusting your search query, department selection, or status filters.
+                              </p>
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                      {filteredWithdrawnItems.length > 0 && (
+                        <tfoot>
+                          <tr className="bg-[#FAF9F5] border-t-2 border-[#E6E4DD] font-bold text-[#3E312C]">
+                            <td colSpan={3} className="py-3 px-3.5 text-right text-xs uppercase tracking-wide">
+                              Overall Total Disbursed:
+                            </td>
+                            <td className="py-3 px-3.5 text-right text-sm">
+                              {filteredWithdrawnItems.reduce((sum, it) => sum + it.totalQuantityWithdrawn, 0).toLocaleString()} units
+                            </td>
+                            <td className="py-3 px-3.5 text-right text-[#8C7A6B] font-mono">-</td>
+                            <td className="py-3 px-3.5 text-right text-sm font-mono text-[#3E312C]">
+                              ₱{filteredWithdrawnItems.reduce((sum, it) => sum + it.overallValue, 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                            <td className="py-3 px-3.5 text-center text-[11px] text-[#8C7A6B] font-mono">
+                              100% Share
+                            </td>
+                          </tr>
+                        </tfoot>
+                      )}
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* VIEW MODE 2: By Withdrawal Slip */}
+              {reportViewMode === 'slips' && (
+                <div className="space-y-3">
+                  {filteredReportSlips.length > 0 ? (
+                    filteredReportSlips.map((wd) => {
+                      const isExpanded = expandedReportSlipId === wd.id;
+                      return (
+                        <div 
+                          key={wd.id} 
+                          className="border border-[#E6E4DD] rounded-2xl overflow-hidden bg-white shadow-2xs hover:border-[#8C7A6B] transition-colors"
+                        >
+                          <div 
+                            className="p-4 bg-[#FAF9F5] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 cursor-pointer select-none"
+                            onClick={() => setExpandedReportSlipId(isExpanded ? null : wd.id)}
+                          >
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-mono font-bold text-sm text-[#3E312C]">{wd.withdrawalNumber}</span>
+                                <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full border ${getStatusColor(wd.status)}`}>
+                                  {wd.status}
+                                </span>
+                                <span className="text-xs text-[#8C7A6B]">
+                                  • {new Date(wd.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
+                                </span>
+                              </div>
+                              <div className="text-xs text-[#8C7A6B] flex items-center gap-2">
+                                <span>Requested by: <strong className="text-[#3E312C]">{wd.createdByName}</strong></span>
+                                <span>• Purpose: <span className="text-[#3E312C]">{wd.purpose}</span></span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-4 self-end sm:self-center">
+                              <div className="text-right">
+                                <div className="font-serif text-base font-bold text-[#3E312C]">
+                                  ₱{wd.slipTotalValuation.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </div>
+                                <div className="text-[11px] text-[#8C7A6B] font-mono">
+                                  {wd.slipTotalUnits} items across {wd.items.length} SKUs
+                                </div>
+                              </div>
+                              <div className="p-1 rounded-full text-[#8C7A6B]">
+                                {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Expanded Slip Item Details */}
+                          {isExpanded && (
+                            <div className="p-4 border-t border-[#E6E4DD] bg-white">
+                              <div className="text-xs font-bold text-[#3E312C] mb-2.5 uppercase tracking-wide">
+                                Line Items Withdrawn on Voucher:
+                              </div>
+                              <div className="border border-[#F0EFE9] rounded-xl overflow-hidden">
+                                <table className="w-full text-left text-xs border-collapse">
+                                  <thead>
+                                    <tr className="bg-[#FAF9F5] text-[#8C7A6B] border-b border-[#F0EFE9]">
+                                      <th className="py-2.5 px-3 font-medium">Item Name</th>
+                                      <th className="py-2.5 px-3 font-medium">Source Tab</th>
+                                      <th className="py-2.5 px-3 text-right font-medium">Quantity</th>
+                                      <th className="py-2.5 px-3 text-right font-medium">Unit Price</th>
+                                      <th className="py-2.5 px-3 text-right font-medium">Overall Value</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-[#F0EFE9]">
+                                    {wd.itemDetails.map((it, itIdx) => (
+                                      <tr key={itIdx} className="hover:bg-[#FAF9F5]/40">
+                                        <td className="py-2.5 px-3 font-medium text-[#3E312C]">{it.itemName}</td>
+                                        <td className="py-2.5 px-3 text-[#8C7A6B]">{it.sectionLabel}</td>
+                                        <td className="py-2.5 px-3 text-right font-bold text-[#3E312C]">{it.quantity} {it.unit}</td>
+                                        <td className="py-2.5 px-3 text-right font-mono text-[#8C7A6B]">
+                                          ₱{it.unitCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </td>
+                                        <td className="py-2.5 px-3 text-right font-mono font-bold text-[#3E312C]">
+                                          ₱{it.lineVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="border border-[#E6E4DD] rounded-2xl p-12 text-center text-[#8C7A6B]">
+                      <AlertCircle className="h-8 w-8 mx-auto text-[#8C7A6B]/50 mb-2" />
+                      <p className="font-semibold text-sm">No withdrawal slips match the selected criteria</p>
+                      <p className="text-xs text-[#8C7A6B]/80 mt-0.5">Try widening your date or department filters.</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Bottom Footer */}
+            <div className="p-4 sm:p-5 border-t border-[#F0EFE9] bg-[#FAF9F5] flex flex-col sm:flex-row justify-between items-center gap-3">
+              <div className="text-xs text-[#8C7A6B] flex items-center gap-1.5">
+                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                <span>Synchronized with live inventory unit prices and historical withdrawal records.</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsReportModalOpen(false)}
+                  className="bg-white border border-[#EBE6DD] hover:bg-[#FAF9F5] text-[#3E312C] font-semibold text-xs px-5 py-2.5 rounded-full cursor-pointer"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExportWithdrawalReportPDF}
+                  className="bg-[#3E312C] hover:bg-[#2C211F] text-white font-semibold text-xs px-5 py-2.5 rounded-full cursor-pointer shadow-xs flex items-center gap-1.5"
+                >
+                  <Printer className="h-3.5 w-3.5 text-white" />
+                  <span>Download Audit PDF</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

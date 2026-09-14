@@ -19,6 +19,9 @@ import {
   MinusCircle,
   Printer,
   FileText,
+  FileSpreadsheet,
+  BarChart3,
+  Download,
   Calendar,
   Tags,
   ChefHat,
@@ -85,7 +88,6 @@ export const getSectionName = (sec: InventorySection): string => {
     case 'LINENS': return 'Linens';
     case 'INDUSTRIAL_EQUIPMENTS': return 'Industrial Equipments';
     case 'LUZON': return 'Luzon';
-    case 'VISAYAS': return 'Visayas';
     case 'MINDANAO':
     case 'OLD_HR_OFFICE': return 'Old H.R Office';
     default: return sec;
@@ -109,12 +111,33 @@ export const getSectionValuationHeader = (sec: InventorySection): string => {
     case 'LINENS': return 'LINENS - VALUATION & PRICE BREAKDOWN';
     case 'INDUSTRIAL_EQUIPMENTS': return 'INDUSTRIAL EQUIPMENTS - VALUATION & PRICE BREAKDOWN';
     case 'LUZON': return 'LUZON - VALUATION & PRICE BREAKDOWN';
-    case 'VISAYAS': return 'VISAYAS - VALUATION & PRICE BREAKDOWN';
     case 'MINDANAO':
     case 'OLD_HR_OFFICE': return 'OLD H.R OFFICE - VALUATION & PRICE BREAKDOWN';
     default: return `${sec} - VALUATION & PRICE BREAKDOWN`;
   }
 };
+
+export const ACTIVE_INVENTORY_TABS: Array<{ value: InventorySection; label: string }> = [
+  { value: 'KITCHEN', label: 'Kitchen' },
+  { value: 'ROOMS', label: 'Rooms' },
+  { value: 'HOUSEKEEPING', label: 'Housekeeping Supplies' },
+  { value: 'HOUSEKEEPING_EQUIPMENTS', label: 'Housekeeping Equipments' },
+  { value: 'HR_EQUIPMENTS', label: 'H.R Equipments' },
+  { value: 'FO_EQUIPMENTS', label: 'F.O Equipments' },
+  { value: 'FINANCE_EQUIPMENTS', label: 'Finance Equipments' },
+  { value: 'SECURITY_POST_EQUIPMENTS', label: 'Security Post Equipments' },
+  { value: 'IT_EQUIPMENTS', label: 'I.T Equipments' },
+  { value: 'LINENS', label: 'Linens' },
+  { value: 'INDUSTRIAL_EQUIPMENTS', label: 'Industrial Equipments' },
+  { value: 'LUZON', label: 'Luzon' },
+  { value: 'MINDANAO', label: 'Old H.R Office' },
+];
+
+// Property Tabs for Inventory Report Generator
+// Consumable goods such as Housekeeping Supplies are excluded because they are consumables, not properties.
+export const REPORT_PROPERTY_TABS: Array<{ value: InventorySection; label: string }> = ACTIVE_INVENTORY_TABS.filter(
+  tab => tab.value !== 'HOUSEKEEPING'
+);
 
 export default function Inventory({
   inventory,
@@ -200,6 +223,19 @@ export default function Inventory({
   const [bulkAutoDeductStock, setBulkAutoDeductStock] = useState(true);
   const [bulkDeployError, setBulkDeployError] = useState('');
   const [bulkDeploySuccessMsg, setBulkDeploySuccessMsg] = useState<string | null>(null);
+
+  // All-Departments Report Generator State
+  const [isAllDeptsReportOpen, setIsAllDeptsReportOpen] = useState(false);
+  const [reportSearchQuery, setReportSearchQuery] = useState('');
+  const [expandedReportSections, setExpandedReportSections] = useState<Record<string, boolean>>({});
+  const [reportViewMode, setReportViewMode] = useState<'summary' | 'detailed'>('summary');
+
+  // Safeguard: if sectionFilter was VISAYAS, reset to KITCHEN
+  React.useEffect(() => {
+    if (sectionFilter === ('VISAYAS' as any)) {
+      setSectionFilter('KITCHEN');
+    }
+  }, [sectionFilter]);
 
   // Memoized Room Filters & Stats
   const uniqueRoomTypes = useMemo(() => {
@@ -746,7 +782,6 @@ export default function Inventory({
     'LINENS',
     'INDUSTRIAL_EQUIPMENTS',
     'LUZON',
-    'VISAYAS',
     'MINDANAO'
   ];
 
@@ -1535,6 +1570,277 @@ export default function Inventory({
     return { totalCost, totalItems };
   }, [inventory, sectionFilter, aggregatedDeployedItems]);
 
+  // Computed All-Departments Consolidated Property Report
+  // Consumable goods such as Housekeeping Supplies are excluded because they are consumables and not hotel properties.
+  const allDepartmentsReport = useMemo(() => {
+    const reportData = REPORT_PROPERTY_TABS.map((tab, idx) => {
+      let deptItems: Array<{
+        id: string;
+        name: string;
+        category: string;
+        currentStock: number;
+        unit: string;
+        unitCost: number;
+        totalValue: number;
+        sourceType?: string;
+      }> = [];
+
+      if (tab.value === 'ROOMS') {
+        // Reserve inventory in ROOMS (excluding consumables)
+        const reserveItems = inventory.filter(i => {
+          if ((i.section || 'KITCHEN') !== 'ROOMS') return false;
+          const cat = (i.category || '').toLowerCase();
+          return !cat.includes('housekeeping supplies') && !cat.includes('consumable');
+        });
+        reserveItems.forEach(item => {
+          deptItems.push({
+            id: item.id,
+            name: item.name,
+            category: item.category,
+            currentStock: item.currentStock,
+            unit: item.unit,
+            unitCost: item.unitCost,
+            totalValue: item.currentStock * item.unitCost,
+            sourceType: 'Reserve Storage'
+          });
+        });
+
+        // Deployed room items (properties / equipment)
+        aggregatedDeployedItems.forEach(dep => {
+          const cat = (dep.category || '').toLowerCase();
+          if (cat.includes('housekeeping supplies') || cat.includes('consumable')) return;
+          deptItems.push({
+            id: `deployed-${dep.name}`,
+            name: `${dep.name} (Deployed in Guest Rooms)`,
+            category: dep.category,
+            currentStock: dep.totalQuantity,
+            unit: dep.unit,
+            unitCost: dep.unitCost,
+            totalValue: dep.totalQuantity * dep.unitCost,
+            sourceType: `Deployed (${dep.roomsCount} Rooms)`
+          });
+        });
+      } else {
+        const secItems = inventory.filter(i => {
+          const sec = i.section || 'KITCHEN';
+          if (sec !== tab.value) return false;
+          if (sec === 'HOUSEKEEPING') return false; // Housekeeping supplies are consumable goods
+          const cat = (i.category || '').toLowerCase();
+          if (cat.includes('housekeeping supplies') || cat.includes('consumable')) return false;
+          return true;
+        });
+        secItems.forEach(item => {
+          deptItems.push({
+            id: item.id,
+            name: item.name,
+            category: item.category,
+            currentStock: item.currentStock,
+            unit: item.unit,
+            unitCost: item.unitCost,
+            totalValue: item.currentStock * item.unitCost,
+            sourceType: 'Department Property'
+          });
+        });
+      }
+
+      const totalItemsCount = deptItems.length;
+      const totalUnits = deptItems.reduce((sum, it) => sum + it.currentStock, 0);
+      const totalValuation = deptItems.reduce((sum, it) => sum + it.totalValue, 0);
+
+      return {
+        index: idx + 1,
+        section: tab.value,
+        name: tab.label,
+        totalItemsCount,
+        totalUnits,
+        totalValuation,
+        items: deptItems
+      };
+    });
+
+    const grandTotalItems = reportData.reduce((sum, d) => sum + d.totalItemsCount, 0);
+    const grandTotalUnits = reportData.reduce((sum, d) => sum + d.totalUnits, 0);
+    const grandTotalValuation = reportData.reduce((sum, d) => sum + d.totalValuation, 0);
+
+    return {
+      departments: reportData,
+      grandTotalItems,
+      grandTotalUnits,
+      grandTotalValuation
+    };
+  }, [inventory, aggregatedDeployedItems]);
+
+  const filteredReportDepartments = useMemo(() => {
+    if (!reportSearchQuery.trim()) return allDepartmentsReport.departments;
+    const query = reportSearchQuery.toLowerCase();
+    return allDepartmentsReport.departments.filter(dept => {
+      const matchDeptName = dept.name.toLowerCase().includes(query);
+      const matchItem = dept.items.some(it => 
+        it.name.toLowerCase().includes(query) || 
+        it.category.toLowerCase().includes(query)
+      );
+      return matchDeptName || matchItem;
+    });
+  }, [allDepartmentsReport, reportSearchQuery]);
+
+  const handleExportAllDeptsPDF = () => {
+    try {
+      const doc = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      });
+
+      const primaryColor = [62, 49, 44]; // #3E312C
+      const secondaryColor = [140, 122, 107]; // #8C7A6B
+
+      // Header
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(18);
+      doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.text("MADIGUN HOTEL AND EVENTS", 15, 20);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.5);
+      doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
+      doc.text("HOTEL PROPERTY & VALUATION CONSOLIDATED AUDIT", 15, 25);
+
+      // Line under header
+      doc.setDrawColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.setLineWidth(0.6);
+      doc.line(15, 28, 195, 28);
+
+      // Title
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(13);
+      doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.text("PROPERTY INVENTORY & VALUATION SUMMARY REPORT", 15, 36);
+
+      // Subtitle
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.text(`Scope: Property & Asset Tabs (${allDepartmentsReport.departments.length} Sections | Consumable Housekeeping Supplies excluded) | ${new Date().toLocaleDateString('en-US', { dateStyle: 'medium' })}`, 15, 41);
+      doc.text(`Audited By: ${currentUser.name} (${currentUser.role.toUpperCase()})`, 195, 41, { align: 'right' });
+
+      // Table rows
+      const tableBody = allDepartmentsReport.departments.map((dept, index) => {
+        const share = allDepartmentsReport.grandTotalValuation > 0 
+          ? ((dept.totalValuation / allDepartmentsReport.grandTotalValuation) * 100).toFixed(1) + '%' 
+          : '0.0%';
+        return [
+          String(index + 1),
+          dept.name,
+          `${dept.totalItemsCount} Products`,
+          `${dept.totalUnits.toLocaleString()} units`,
+          `PHP ${dept.totalValuation.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          share
+        ];
+      });
+
+      autoTable(doc, {
+        startY: 46,
+        margin: { left: 15, right: 15 },
+        head: [['#', 'Property Department / Tracker Tab', 'Total Items (SKUs)', 'Total Stock Units', 'Total Department Value (PHP)', 'Valuation Share']],
+        body: tableBody,
+        theme: 'striped',
+        headStyles: {
+          fillColor: [62, 49, 44],
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          fontSize: 8.5
+        },
+        columnStyles: {
+          0: { cellWidth: 10, halign: 'center' },
+          1: { cellWidth: 55 },
+          2: { cellWidth: 30, halign: 'right' },
+          3: { cellWidth: 30, halign: 'right' },
+          4: { cellWidth: 35, halign: 'right', fontStyle: 'bold' },
+          5: { cellWidth: 20, halign: 'right' }
+        },
+        foot: [[
+          { content: 'GRAND TOTAL (ALL PROPERTY DEPTS):', colSpan: 2, styles: { halign: 'right', fontStyle: 'bold', fontSize: 9 } },
+          { content: `${allDepartmentsReport.grandTotalItems} Products`, styles: { halign: 'right', fontStyle: 'bold', fontSize: 9 } },
+          { content: `${allDepartmentsReport.grandTotalUnits.toLocaleString()} units`, styles: { halign: 'right', fontStyle: 'bold', fontSize: 9 } },
+          { content: `PHP ${allDepartmentsReport.grandTotalValuation.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, styles: { halign: 'right', fontStyle: 'bold', fontSize: 9 } },
+          { content: '100.0%', styles: { halign: 'right', fontStyle: 'bold', fontSize: 9 } }
+        ]],
+        footStyles: {
+          fillColor: [244, 242, 235],
+          textColor: [62, 49, 44]
+        },
+        styles: {
+          fontSize: 8,
+          cellPadding: 2.5
+        }
+      });
+
+      // Signatures
+      let finalY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 22 : 200;
+      if (finalY > 250) {
+        doc.addPage();
+        finalY = 35;
+      }
+
+      doc.setDrawColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.setLineWidth(0.25);
+
+      // Left signature: Staff
+      doc.line(25, finalY, 85, finalY);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.text(currentUser.name, 55, finalY + 4, { align: 'center' });
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
+      doc.text("PREPARED BY / STAFF IN CHARGE", 55, finalY + 8, { align: 'center' });
+
+      // Right signature: General Manager / Auditor
+      doc.line(125, finalY, 185, finalY);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.text("(Signature over Printed Name)", 155, finalY + 4, { align: 'center' });
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
+      doc.text("HOTEL GENERAL MANAGER / AUDITOR", 155, finalY + 8, { align: 'center' });
+
+      doc.save(`Property_Inventory_Valuation_Report_${new Date().toISOString().split('T')[0]}.pdf`);
+    } catch (err) {
+      console.error("PDF All Departments Report error:", err);
+      window.print();
+    }
+  };
+
+  const handleExportAllDeptsCSV = () => {
+    const lines = [
+      `"MADIGUN HOTEL AND EVENTS - PROPERTY INVENTORY & VALUATION REPORT"`,
+      `"Scope:","Hotel Property Sections (Housekeeping Supplies excluded as consumable goods)"`,
+      `"Generated Date:","${new Date().toLocaleDateString('en-US')}"`,
+      `"Audited By:","${currentUser.name} (${currentUser.role})"`,
+      `""`,
+      `"Property Department / Tracker Tab","Total Unique Items (SKUs)","Total Units in Stock","Total Valuation (PHP)","Valuation Share (%)"`
+    ];
+
+    allDepartmentsReport.departments.forEach(dept => {
+      const share = allDepartmentsReport.grandTotalValuation > 0
+        ? ((dept.totalValuation / allDepartmentsReport.grandTotalValuation) * 100).toFixed(1)
+        : '0.0';
+      lines.push(`"${dept.name}",${dept.totalItemsCount},${dept.totalUnits},${dept.totalValuation.toFixed(2)},${share}%`);
+    });
+
+    lines.push(`"GRAND TOTAL",${allDepartmentsReport.grandTotalItems},${allDepartmentsReport.grandTotalUnits},${allDepartmentsReport.grandTotalValuation.toFixed(2)},100%`);
+
+    const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + encodeURIComponent(lines.join("\n"));
+    const link = document.createElement("a");
+    link.setAttribute("href", csvContent);
+    link.setAttribute("download", `Property_Inventory_Valuation_Report_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   // Filtering Logic
   const filteredItems = useMemo(() => {
     return inventory.filter(item => {
@@ -1778,8 +2084,20 @@ export default function Inventory({
             </div>
           </div>
 
-          {/* Add Item or File Damage Report Trigger */}
+          {/* Add Item, Report Generator or File Damage Report Trigger */}
           <div className="flex flex-wrap items-center gap-2">
+            {/* Report Generator Button */}
+            <button
+              type="button"
+              onClick={() => setIsAllDeptsReportOpen(true)}
+              className="flex items-center gap-2 bg-[#8C7355] hover:bg-[#745E44] text-white font-semibold text-xs px-4 py-3 rounded-full transition-all shadow-xs cursor-pointer"
+              id="all-depts-report-btn"
+              title="Generate consolidated report for all department tabs (Total items & Total value)"
+            >
+              <FileSpreadsheet className="h-4 w-4 text-white" />
+              <span>Report Generator</span>
+            </button>
+
             {onNavigate && (
               <button
                 type="button"
@@ -1864,7 +2182,6 @@ export default function Inventory({
                     <option value="LINENS">Linens</option>
                     <option value="INDUSTRIAL_EQUIPMENTS">Industrial Equipments</option>
                     <option value="LUZON">Luzon</option>
-                    <option value="VISAYAS">Visayas</option>
                     <option value="MINDANAO">Old H.R Office</option>
                   </select>
                 </div>
@@ -2483,7 +2800,6 @@ export default function Inventory({
             { value: 'LINENS', label: 'Linens', icon: <Shirt className="h-4.5 w-4.5" /> },
             { value: 'INDUSTRIAL_EQUIPMENTS', label: 'Industrial Equipments', icon: <Building2 className="h-4.5 w-4.5" /> },
             { value: 'LUZON', label: 'Luzon', icon: <Layers className="h-4.5 w-4.5" /> },
-            { value: 'VISAYAS', label: 'Visayas', icon: <Layers className="h-4.5 w-4.5" /> },
             { value: 'MINDANAO', label: 'Old H.R Office', icon: <Layers className="h-4.5 w-4.5" /> },
           ].map((sec) => (
             <button
@@ -3584,6 +3900,18 @@ export default function Inventory({
             >
               <FileText className="h-3.5 w-3.5 text-white" />
               <span className="text-white">{getSectionName(sectionFilter)} Valuation PDF</span>
+            </button>
+
+            {/* Generate All Depts Report Generator Button */}
+            <button
+              type="button"
+              onClick={() => setIsAllDeptsReportOpen(true)}
+              className="flex items-center gap-1.5 bg-[#8C7355] hover:bg-[#745E44] text-white font-semibold text-xs px-4 py-1.5 rounded-full cursor-pointer transition-colors shadow-2xs"
+              id="generate-all-depts-report-toolbar-btn"
+              title="Generate comprehensive report for all inventory tabs (total items & total value)"
+            >
+              <FileSpreadsheet className="h-3.5 w-3.5 text-white" />
+              <span className="text-white">Report Generator</span>
             </button>
 
             {/* Transfer Item Button (for all tabs except ROOMS) */}
@@ -5834,6 +6162,377 @@ export default function Inventory({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* All Departments Inventory & Valuation Report Modal */}
+      {isAllDeptsReportOpen && (
+        <div 
+          className="fixed inset-0 z-50 overflow-y-auto bg-[#3E312C]/60 flex items-center justify-center p-3 sm:p-4 backdrop-blur-xs" 
+          id="all-depts-report-modal"
+        >
+          <div className="bg-white border border-[#E6E4DD] rounded-[28px] sm:rounded-[32px] max-w-5xl w-full shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-in fade-in zoom-in-95 duration-150">
+            
+            {/* Modal Header */}
+            <div className="p-5 sm:p-6 border-b border-[#F0EFE9] bg-[#FAF9F5] flex items-start justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-[#3E312C] text-white rounded-2xl shadow-xs">
+                  <FileSpreadsheet className="h-6 w-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] bg-[#8C7355] text-white font-bold uppercase tracking-wider px-2 py-0.5 rounded-full">
+                      Property & Assets Report
+                    </span>
+                    <span className="text-xs text-[#8C7A6B]">
+                      {allDepartmentsReport.departments.length} Property Sections (Consumable Supplies Excluded)
+                    </span>
+                  </div>
+                  <h3 className="font-serif text-xl sm:text-2xl font-bold text-[#3E312C] mt-0.5">
+                    Property Departments Valuation & Item Totals Report
+                  </h3>
+                  <p className="text-xs text-[#8C7A6B] mt-0.5">
+                    Real-time consolidated breakdown of total listed items and valuation for every property department in the inventory tracker (Housekeeping supplies are excluded as consumable goods).
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAllDeptsReportOpen(false)}
+                className="text-[#8C7A6B] hover:text-[#3E312C] p-2 rounded-full hover:bg-white transition-colors cursor-pointer"
+                title="Close Report"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Modal Body (Scrollable) */}
+            <div className="p-5 sm:p-6 overflow-y-auto flex-1 space-y-5">
+              
+              {/* Top 4 KPI Summary Cards */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                <div className="bg-[#FAF9F5] border border-[#EBE6DD] p-4 rounded-2xl">
+                  <span className="text-[10px] text-[#8C7A6B] font-bold uppercase tracking-wider font-mono">
+                    Property Departments
+                  </span>
+                  <p className="text-xl font-serif font-bold text-[#3E312C] mt-1">
+                    {allDepartmentsReport.departments.length} Tabs
+                  </p>
+                  <p className="text-[11px] text-[#8C7A6B] mt-0.5">Excludes Consumables</p>
+                </div>
+
+                <div className="bg-[#FAF9F5] border border-[#EBE6DD] p-4 rounded-2xl">
+                  <span className="text-[10px] text-[#8C7A6B] font-bold uppercase tracking-wider font-mono">
+                    Total Listed Items
+                  </span>
+                  <p className="text-xl font-serif font-bold text-[#3E312C] mt-1">
+                    {allDepartmentsReport.grandTotalItems} Products
+                  </p>
+                  <p className="text-[11px] text-[#8C7A6B] mt-0.5">Distinct SKUs & Assets</p>
+                </div>
+
+                <div className="bg-[#FAF9F5] border border-[#EBE6DD] p-4 rounded-2xl">
+                  <span className="text-[10px] text-[#8C7A6B] font-bold uppercase tracking-wider font-mono">
+                    Total Units in Stock
+                  </span>
+                  <p className="text-xl font-serif font-bold text-[#3E312C] mt-1">
+                    {allDepartmentsReport.grandTotalUnits.toLocaleString()} Units
+                  </p>
+                  <p className="text-[11px] text-[#8C7A6B] mt-0.5">Combined Stock Quantity</p>
+                </div>
+
+                <div className="bg-[#3E312C] text-white p-4 rounded-2xl shadow-xs">
+                  <span className="text-[10px] text-[#DCD5C9] font-bold uppercase tracking-wider font-mono">
+                    Total Inventory Value
+                  </span>
+                  <p className="text-xl font-mono font-bold text-emerald-300 mt-1">
+                    ₱{allDepartmentsReport.grandTotalValuation.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                  <p className="text-[11px] text-[#DCD5C9] mt-0.5">Overall Property Valuation</p>
+                </div>
+              </div>
+
+              {/* Action and Filter Toolbar */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-[#FAF9F5] p-3 rounded-2xl border border-[#EBE6DD]">
+                <div className="relative flex-1 max-w-md">
+                  <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#8C7A6B]" />
+                  <input
+                    type="text"
+                    placeholder="Search department or item name..."
+                    value={reportSearchQuery}
+                    onChange={(e) => setReportSearchQuery(e.target.value)}
+                    className="w-full pl-9 pr-3 py-1.5 text-xs bg-white border border-[#E6E4DD] rounded-xl text-[#3E312C] placeholder-[#8C7A6B] focus:outline-hidden focus:ring-1 focus:ring-[#3E312C]"
+                  />
+                  {reportSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setReportSearchQuery('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#8C7A6B] hover:text-[#3E312C]"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setReportViewMode(prev => prev === 'summary' ? 'detailed' : 'summary')}
+                    className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border transition-all cursor-pointer ${
+                      reportViewMode === 'detailed'
+                        ? 'bg-[#3E312C] text-white border-[#3E312C]'
+                        : 'bg-white text-[#3E312C] border-[#E6E4DD] hover:bg-[#F4F2EB]'
+                    }`}
+                    title="Toggle detailed item breakdown for all departments"
+                  >
+                    <ClipboardList className="h-3.5 w-3.5" />
+                    <span>{reportViewMode === 'detailed' ? 'Collapse Items' : 'Expand All Items'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleExportAllDeptsCSV}
+                    className="flex items-center gap-1.5 bg-white hover:bg-[#F4F2EB] text-[#3E312C] border border-[#E6E4DD] text-xs font-semibold px-3 py-1.5 rounded-full transition-all cursor-pointer shadow-2xs"
+                    title="Export report as CSV spreadsheet"
+                  >
+                    <Download className="h-3.5 w-3.5 text-[#8C7A6B]" />
+                    <span>Export CSV</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleExportAllDeptsPDF}
+                    className="flex items-center gap-1.5 bg-[#3E312C] hover:bg-[#2C211F] text-white text-xs font-bold px-4 py-1.5 rounded-full transition-all cursor-pointer shadow-2xs"
+                    title="Download official PDF summary report"
+                  >
+                    <Printer className="h-3.5 w-3.5 text-white" />
+                    <span>Download PDF</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Department Summary Table */}
+              <div className="border border-[#E6E4DD] rounded-2xl overflow-hidden bg-white shadow-2xs">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-[#3E312C] text-white">
+                        <th className="py-3 px-3.5 font-bold uppercase tracking-wider text-[10px] w-12 text-center">#</th>
+                        <th className="py-3 px-4 font-bold uppercase tracking-wider text-[10px]">Department / Tracker Tab</th>
+                        <th className="py-3 px-4 font-bold uppercase tracking-wider text-[10px] text-right">Total Items (SKUs)</th>
+                        <th className="py-3 px-4 font-bold uppercase tracking-wider text-[10px] text-right">Total Stock Units</th>
+                        <th className="py-3 px-4 font-bold uppercase tracking-wider text-[10px] text-right">Total Dept Value (PHP)</th>
+                        <th className="py-3 px-4 font-bold uppercase tracking-wider text-[10px] text-right">% Share</th>
+                        <th className="py-3 px-3.5 font-bold uppercase tracking-wider text-[10px] text-center w-24">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#F0EFE9]">
+                      {filteredReportDepartments.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="py-8 text-center text-[#8C7A6B] italic">
+                            No departments or items match your search.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredReportDepartments.map((dept) => {
+                          const isExpanded = reportViewMode === 'detailed' || !!expandedReportSections[dept.section];
+                          const shareNum = allDepartmentsReport.grandTotalValuation > 0
+                            ? (dept.totalValuation / allDepartmentsReport.grandTotalValuation) * 100
+                            : 0;
+
+                          return (
+                            <React.Fragment key={dept.section}>
+                              <tr className="hover:bg-[#FAF9F5] transition-colors">
+                                <td className="py-3 px-3.5 text-center font-mono text-[#8C7A6B]">
+                                  {dept.index}
+                                </td>
+                                <td className="py-3 px-4 font-bold text-[#3E312C]">
+                                  <div className="flex items-center gap-2">
+                                    <span className="w-2 h-2 rounded-full bg-[#8C7355]"></span>
+                                    <span>{dept.name}</span>
+                                    {dept.section === 'ROOMS' && (
+                                      <span className="text-[10px] bg-[#EBE6DD] text-[#3E312C] px-1.5 py-0.5 rounded font-normal">
+                                        Reserve + Deployed
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="py-3 px-4 text-right font-semibold text-[#3E312C]">
+                                  {dept.totalItemsCount} {dept.totalItemsCount === 1 ? 'item' : 'items'}
+                                </td>
+                                <td className="py-3 px-4 text-right text-[#3E312C]">
+                                  <span className="font-mono">{dept.totalUnits.toLocaleString()}</span> units
+                                </td>
+                                <td className="py-3 px-4 text-right font-mono font-bold text-[#3E312C]">
+                                  ₱{dept.totalValuation.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </td>
+                                <td className="py-3 px-4 text-right font-mono">
+                                  <div className="flex items-center justify-end gap-2">
+                                    <span className="text-[#8C7A6B] text-[11px]">{shareNum.toFixed(1)}%</span>
+                                    <div className="w-12 bg-[#EBE8DF] h-1.5 rounded-full overflow-hidden hidden sm:block">
+                                      <div 
+                                        className="bg-[#8C7355] h-full rounded-full" 
+                                        style={{ width: `${Math.min(100, shareNum)}%` }}
+                                      />
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="py-3 px-3.5 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setExpandedReportSections(prev => ({
+                                        ...prev,
+                                        [dept.section]: !prev[dept.section]
+                                      }));
+                                    }}
+                                    className="px-2.5 py-1 text-[11px] font-semibold text-[#8C7355] hover:text-[#3E312C] hover:bg-[#EBE8DF] rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1"
+                                    title="View items list in this department"
+                                  >
+                                    <span>{isExpanded ? 'Hide' : 'Items'}</span>
+                                    {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                                  </button>
+                                </td>
+                              </tr>
+
+                              {/* Expanded Item List Breakdown */}
+                              {isExpanded && (
+                                <tr className="bg-[#FAF9F5]">
+                                  <td colSpan={7} className="p-3 sm:p-4 border-t border-b border-[#E6E4DD]">
+                                    <div className="bg-white border border-[#EBE6DD] rounded-xl p-3 shadow-2xs">
+                                      <div className="flex items-center justify-between mb-2">
+                                        <div className="flex items-center gap-1.5">
+                                          <Package className="h-3.5 w-3.5 text-[#8C7355]" />
+                                          <span className="font-bold text-xs text-[#3E312C]">
+                                            {dept.name} • Itemized Breakdown ({dept.items.length} listed)
+                                          </span>
+                                        </div>
+                                        <span className="text-[11px] text-[#8C7A6B] font-mono">
+                                          Dept Subtotal: ₱{dept.totalValuation.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </span>
+                                      </div>
+
+                                      {dept.items.length === 0 ? (
+                                        <p className="text-xs text-[#8C7A6B] italic py-2">
+                                          No items currently logged in this department.
+                                        </p>
+                                      ) : (
+                                        <div className="overflow-x-auto max-h-52 overflow-y-auto">
+                                          <table className="w-full text-left text-xs">
+                                            <thead>
+                                              <tr className="border-b border-[#E6E4DD] text-[#8C7A6B] text-[10px] uppercase font-bold">
+                                                <th className="py-1.5 px-2">Item Name</th>
+                                                <th className="py-1.5 px-2">Category</th>
+                                                <th className="py-1.5 px-2 text-right">Quantity</th>
+                                                <th className="py-1.5 px-2 text-right">Unit Cost</th>
+                                                <th className="py-1.5 px-2 text-right">Total Line Value</th>
+                                                <th className="py-1.5 px-2 text-center">Type</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-[#F0EFE9]">
+                                              {dept.items.map((item, itIdx) => (
+                                                <tr key={`${item.id}-${itIdx}`} className="hover:bg-[#FAF9F5]">
+                                                  <td className="py-1.5 px-2 font-semibold text-[#3E312C]">{item.name}</td>
+                                                  <td className="py-1.5 px-2 text-[#8C7A6B]">{item.category}</td>
+                                                  <td className="py-1.5 px-2 text-right font-mono text-[#3E312C]">
+                                                    {item.currentStock} {item.unit}
+                                                  </td>
+                                                  <td className="py-1.5 px-2 text-right font-mono text-[#8C7A6B]">
+                                                    ₱{item.unitCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                  </td>
+                                                  <td className="py-1.5 px-2 text-right font-mono font-bold text-[#3E312C]">
+                                                    ₱{item.totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                  </td>
+                                                  <td className="py-1.5 px-2 text-center text-[10px] text-[#8C7A6B]">
+                                                    <span className="bg-[#FAF9F5] px-1.5 py-0.5 rounded border border-[#EBE6DD]">
+                                                      {item.sourceType || 'Stock'}
+                                                    </span>
+                                                  </td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          );
+                        })
+                      )}
+                    </tbody>
+                    <tfoot className="bg-[#FAF9F5] border-t-2 border-[#3E312C] text-[#3E312C]">
+                      <tr>
+                        <td colSpan={2} className="py-3 px-4 font-bold text-xs uppercase tracking-wider text-right">
+                          Grand Total (All Departments):
+                        </td>
+                        <td className="py-3 px-4 text-right font-bold text-xs text-[#3E312C]">
+                          {allDepartmentsReport.grandTotalItems} Products
+                        </td>
+                        <td className="py-3 px-4 text-right font-bold font-mono text-xs text-[#3E312C]">
+                          {allDepartmentsReport.grandTotalUnits.toLocaleString()} units
+                        </td>
+                        <td className="py-3 px-4 text-right font-bold font-mono text-sm text-emerald-700">
+                          ₱{allDepartmentsReport.grandTotalValuation.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="py-3 px-4 text-right font-bold font-mono text-xs text-[#3E312C]">
+                          100.0%
+                        </td>
+                        <td className="py-3 px-3.5"></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+
+              {/* Auditor Sign-off / Property Info Note */}
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pt-2 text-[11px] text-[#8C7A6B]">
+                <p>
+                  Audited & verified by <span className="font-bold text-[#3E312C]">{currentUser.name}</span> ({currentUser.role}) • Madigun Hotel and Events
+                </p>
+                <p className="font-mono">
+                  Generated on: {new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}
+                </p>
+              </div>
+
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 sm:p-5 border-t border-[#F0EFE9] bg-[#FAF9F5] flex flex-wrap items-center justify-between gap-3">
+              <div className="text-xs text-[#8C7A6B]">
+                Total Valuation: <span className="font-bold font-mono text-[#3E312C]">₱{allDepartmentsReport.grandTotalValuation.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span> ({allDepartmentsReport.grandTotalItems} items across {ACTIVE_INVENTORY_TABS.length} department tabs)
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAllDeptsReportOpen(false)}
+                  className="px-5 py-2 border border-[#E6E4DD] text-[#8C7A6B] hover:bg-white font-semibold text-xs rounded-full cursor-pointer transition-colors"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExportAllDeptsCSV}
+                  className="px-4 py-2 bg-white hover:bg-[#F4F2EB] text-[#3E312C] border border-[#E6E4DD] font-semibold text-xs rounded-full cursor-pointer transition-colors shadow-2xs inline-flex items-center gap-1.5"
+                >
+                  <Download className="h-3.5 w-3.5 text-[#8C7A6B]" />
+                  <span>CSV</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExportAllDeptsPDF}
+                  className="px-5 py-2 bg-[#3E312C] hover:bg-[#2C211F] text-white font-bold text-xs rounded-full cursor-pointer shadow-xs transition-colors inline-flex items-center gap-2"
+                >
+                  <Printer className="h-3.5 w-3.5" />
+                  <span>Download PDF Report</span>
+                </button>
+              </div>
+            </div>
+
           </div>
         </div>
       )}
