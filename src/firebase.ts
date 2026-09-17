@@ -3,24 +3,21 @@ import { getAuth, Auth } from 'firebase/auth';
 import { 
   initializeFirestore, 
   getFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
   memoryLocalCache, 
   doc, 
   getDocFromServer,
-  enableNetwork,
-  disableNetwork,
   Firestore
 } from 'firebase/firestore';
+import firebaseAppletConfig from '../firebase-applet-config.json';
 
-const firebaseConfig = {
-  projectId: "mindful-compiler-f6rpq",
-  appId: "1:104282394234:web:59b082f043348fabbb75c3",
-  apiKey: "AIzaSyAkeQpkzK4_oNe6nl_unDxjapHXz4og_80",
-  authDomain: "mindful-compiler-f6rpq.firebaseapp.com",
-  firestoreDatabaseId: "ai-studio-madigunhoteleven-956fecc5-6f7e-44d1-a216-9bcc9e277826",
-  storageBucket: "mindful-compiler-f6rpq.firebasestorage.app",
-  messagingSenderId: "104282394234"
+export const firebaseConfig = {
+  projectId: firebaseAppletConfig.projectId || "arcane-wharf-btsmh",
+  appId: firebaseAppletConfig.appId || "1:741671541489:web:456aea7014ffaec92de750",
+  apiKey: firebaseAppletConfig.apiKey || "AIzaSyDEL29m45qvch3-1MnCgU1OaQzez-VP16o",
+  authDomain: firebaseAppletConfig.authDomain || "arcane-wharf-btsmh.firebaseapp.com",
+  storageBucket: firebaseAppletConfig.storageBucket || "arcane-wharf-btsmh.firebasestorage.app",
+  messagingSenderId: firebaseAppletConfig.messagingSenderId || "741671541489",
+  ...(firebaseAppletConfig as Record<string, any>)
 };
 
 export const app: FirebaseApp = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
@@ -40,18 +37,25 @@ export function getFirebaseAuth(): Auth {
 
 // Initialize Firestore with memory cache for clean, reliable real-time syncing:
 // 1. memoryLocalCache eliminates IndexedDB locking issues, quota limits, and SDK assertion crashes.
-// 2. experimentalAutoDetectLongPolling handles mobile network roaming seamlessly.
+// 2. experimentalAutoDetectLongPolling handles network roaming seamlessly.
 function createFirestoreInstance(): Firestore {
-  const dbId = firebaseConfig.firestoreDatabaseId;
+  const dbId = (firebaseConfig as any).firestoreDatabaseId;
 
   try {
-    return initializeFirestore(app, {
-      localCache: memoryLocalCache(),
-      experimentalAutoDetectLongPolling: true
-    }, dbId);
+    if (dbId) {
+      return initializeFirestore(app, {
+        localCache: memoryLocalCache(),
+        experimentalAutoDetectLongPolling: true
+      }, dbId);
+    } else {
+      return initializeFirestore(app, {
+        localCache: memoryLocalCache(),
+        experimentalAutoDetectLongPolling: true
+      });
+    }
   } catch (err: any) {
     try {
-      return getFirestore(app, dbId);
+      return dbId ? getFirestore(app, dbId) : getFirestore(app);
     } catch (e2) {
       return getFirestore(app);
     }

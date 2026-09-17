@@ -3,17 +3,14 @@ import { getFirebaseAuth } from '../firebase';
 
 // Google Drive OAuth Scopes
 export const DRIVE_SCOPES = [
-  'https://www.googleapis.com/auth/drive',
   'https://www.googleapis.com/auth/drive.file',
-  'https://www.googleapis.com/auth/drive.metadata.readonly',
-  'https://www.googleapis.com/auth/drive.readonly',
-  'https://www.googleapis.com/auth/drive.appdata'
+  'https://www.googleapis.com/auth/drive'
 ];
 
 export const getDriveAuthProvider = (): GoogleAuthProvider => {
   const provider = new GoogleAuthProvider();
   DRIVE_SCOPES.forEach(scope => provider.addScope(scope));
-  provider.setCustomParameters({ prompt: 'consent' });
+  provider.setCustomParameters({ prompt: 'select_account' });
   return provider;
 };
 
@@ -76,12 +73,24 @@ export const signInWithGoogleDrive = async (): Promise<{ user: User; accessToken
     const result = await signInWithPopup(auth, provider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (!credential?.accessToken) {
-      throw new Error('Failed to obtain Google Drive access token');
+      throw new Error('Google signed in, but no Google Drive OAuth access token was returned. Please make sure you grant Drive permissions.');
     }
     cachedAccessToken = credential.accessToken;
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
     console.error('Google Drive sign-in error:', error);
+    if (error.code === 'auth/popup-blocked') {
+      throw new Error('The sign-in popup was blocked by your browser. Please allow popups for this site or open the app in a new window to sign in.');
+    }
+    if (error.code === 'auth/popup-closed-by-user') {
+      throw new Error('Google Sign-in was cancelled before completing.');
+    }
+    if (error.code === 'auth/cancelled-popup-request') {
+      throw new Error('Another sign-in window was opened. Please complete the active popup.');
+    }
+    if (error.code === 'auth/unauthorized-domain') {
+      throw new Error('This domain is not authorized in Firebase Auth. Please open the app in a new tab or add this host to authorized domains.');
+    }
     throw error;
   } finally {
     isSigningIn = false;

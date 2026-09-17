@@ -658,9 +658,29 @@ export function GoogleDriveStorage({
 
         {/* Feedback messages */}
         {authError && (
-          <div className="mt-4 p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2.5">
-            <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600" />
-            <span>{authError}</span>
+          <div className="mt-4 p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600" />
+              <span>{authError}</span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <a
+                href={window.location.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-xl text-xs font-semibold cursor-pointer transition-colors"
+              >
+                <ExternalLink className="h-3 w-3" />
+                <span>Open in New Tab</span>
+              </a>
+              <button
+                type="button"
+                onClick={handleConnect}
+                className="px-3 py-1.5 bg-rose-700 hover:bg-rose-800 text-white rounded-xl text-xs font-semibold cursor-pointer transition-colors"
+              >
+                Retry Sign In
+              </button>
+            </div>
           </div>
         )}
 
