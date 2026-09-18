@@ -1,11 +1,12 @@
 {
-  "projectId": "arcane-wharf-btsmh",
-  "appId": "1:741671541489:web:456aea7014ffaec92de750",
-  "apiKey": "AIzaSyDEL29m45qvch3-1MnCgU1OaQzez-VP16o",
-  "authDomain": "arcane-wharf-btsmh.firebaseapp.com",
-  "storageBucket": "arcane-wharf-btsmh.firebasestorage.app",
-  "messagingSenderId": "741671541489",
+  "projectId": "madigun-systems",
+  "appId": "1:565286406815:web:9d88ca0a68c43f67fc30aa",
+  "apiKey": "AIzaSyB4sxpe2TaDlX6IQ13HMzHHuHI6xr4fmA8",
+  "authDomain": "madigun-systems.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-madigunrequisiti-bc614ca6-9a27-4c9a-bce5-2c9edf92719c",
+  "storageBucket": "madigun-systems.firebasestorage.app",
+  "messagingSenderId": "565286406815",
   "measurementId": "",
-  "oAuthClientId": "741671541489-gdp4no5kan8k4dvlmvd1e0l6nbh9jqfv.apps.googleusercontent.com",
+  "oAuthClientId": "565286406815-cpeegsl5ir892ilpec3pbc6mbn1j4242.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

@@ -10,13 +10,12 @@ import {
   Cloud
 } from 'lucide-react';
 import { User } from '../types';
-import { INITIAL_USERS } from '../data';
 import MadigunLogo from './MadigunLogo';
 
 interface AuthProps {
   onLogin: (user: User) => void;
-  users: typeof INITIAL_USERS;
-  onRegisterUser: (newUser: typeof INITIAL_USERS[0]) => void;
+  users: (User & { password?: string })[];
+  onRegisterUser: (newUser: User & { password?: string }) => void;
   customLogo?: string | null;
 }
 
@@ -86,15 +85,16 @@ export default function Auth({ onLogin, users, onRegisterUser, customLogo = null
       return;
     }
 
+    const isFirstUser = users.length === 0;
     const newUser = {
       id: `user-${Date.now()}`,
       username: regUsername.toLowerCase().trim(),
       password: regPassword,
       name: fullName.trim(),
-      role: 'staff' as const, // Placeholder pending approval & assignment by Primary Admin
-      status: 'pending' as const,
+      role: isFirstUser ? ('admin' as const) : ('staff' as const),
+      status: isFirstUser ? ('approved' as const) : ('pending' as const),
       email: email.trim(),
-      department: 'Pending Assignment',
+      department: isFirstUser ? 'Property Custodian / Administration' : 'Pending Assignment',
       joinedDate: new Date().toISOString().split('T')[0]
     };
 
@@ -108,7 +108,11 @@ export default function Auth({ onLogin, users, onRegisterUser, customLogo = null
 
     // Switch to login tab and display success/pending message
     setActiveTab('login');
-    setRegistrationSuccess('Registration submitted! Your account is currently pending approval. Please inform the Primary Account (Property Custodian) to assign your role and activate your account.');
+    if (isFirstUser) {
+      setRegistrationSuccess('Account created successfully! As the initial user, you have been granted Administrator permissions. You can now log in.');
+    } else {
+      setRegistrationSuccess('Registration submitted! Your account is currently pending approval. Please inform the Administrator to assign your role and activate your account.');
+    }
   };
 
   return (

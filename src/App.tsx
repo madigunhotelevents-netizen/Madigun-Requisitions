@@ -57,7 +57,7 @@ import Withdrawals from './components/Withdrawals';
 import DamageReports from './components/DamageReports';
 import { FoodRequisitions } from './components/FoodRequisitions';
 import Users from './components/Users';
-import { GoogleDriveStorage } from './components/GoogleDriveStorage';
+import { DatabaseSettings } from './components/DatabaseSettings';
 import MadigunLogo from './components/MadigunLogo';
 import { db, handleFirestoreError, OperationType, clearCachesAndVerifyServerConnection } from './firebase';
 import { collection, onSnapshot, setDoc, doc, deleteDoc, writeBatch } from 'firebase/firestore';
@@ -98,7 +98,7 @@ export default function App() {
   }, []);
 
   // --- 1. Persistent Databases synced directly with Firestore Server ---
-  const [users, setUsers] = useState<User[]>(INITIAL_USERS);
+  const [users, setUsers] = useState<User[]>([]);
 
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     try {
@@ -109,13 +109,13 @@ export default function App() {
     }
   });
 
-  const [inventory, setInventory] = useState<InventoryItem[]>(INITIAL_INVENTORY);
-  const [requisitions, setRequisitions] = useState<Requisition[]>(INITIAL_REQUISITIONS);
-  const [logs, setLogs] = useState<AuditLog[]>(INITIAL_LOGS);
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [requisitions, setRequisitions] = useState<Requisition[]>([]);
+  const [logs, setLogs] = useState<AuditLog[]>([]);
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
-  const [rooms, setRooms] = useState<HotelRoom[]>(INITIAL_ROOMS);
+  const [rooms, setRooms] = useState<HotelRoom[]>([]);
   const [damageReports, setDamageReports] = useState<DamageReport[]>([]);
-  const [foodRequisitions, setFoodRequisitions] = useState<FoodRequisition[]>(INITIAL_FOOD_REQUISITIONS);
+  const [foodRequisitions, setFoodRequisitions] = useState<FoodRequisition[]>([]);
 
   const [categories, setCategories] = useState<string[]>([
     'Meat & Poultry',
@@ -147,7 +147,7 @@ export default function App() {
   useEffect(() => {
     if (currentUser) {
       const isFull = currentUser.role === 'admin' || currentUser.role === 'managing_director';
-      if (!isFull && (activeTab === 'drive' || activeTab === 'accounts')) {
+      if (!isFull && (activeTab === 'database' || activeTab === 'accounts')) {
         setActiveTab('dashboard');
       } else if (currentUser.role !== 'admin' && activeTab === 'logs') {
         setActiveTab('dashboard');
@@ -163,183 +163,115 @@ export default function App() {
   const [importError, setImportError] = useState<string | null>(null);
   const [isRestoring, setIsRestoring] = useState(false);
   const [restoreSuccess, setRestoreSuccess] = useState(false);
+  const [showConfirmLogsOverwrite, setShowConfirmLogsOverwrite] = useState(false);
 
   // Firestore Sync Effect
   useEffect(() => {
     // 1. Sync Users
     const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
-      if (snapshot.empty) {
-        // Seed initial users if Firestore is completely empty
-        setUsers(INITIAL_USERS);
-        INITIAL_USERS.forEach(async (u) => {
-          await setDoc(doc(db, 'users', u.id), cleanUndefined(u));
-        });
-      } else {
-        const list: User[] = [];
-        snapshot.forEach((doc) => {
-          list.push(doc.data() as User);
-        });
-        setUsers(list);
+      const list: User[] = [];
+      snapshot.forEach((doc) => {
+        list.push(doc.data() as User);
+      });
+      setUsers(list);
 
-        // Auto-update currentUser session if user fields were modified in Firestore
-        setCurrentUser(prevUser => {
-          if (!prevUser) return null;
-          const latestSelf = list.find(u => u.id === prevUser.id);
-          if (latestSelf) {
-            if (
-              latestSelf.name !== prevUser.name ||
-              latestSelf.role !== prevUser.role ||
-              latestSelf.email !== prevUser.email ||
-              latestSelf.phone !== prevUser.phone ||
-              latestSelf.department !== prevUser.department ||
-              latestSelf.shift !== prevUser.shift ||
-              latestSelf.joinedDate !== prevUser.joinedDate ||
-              latestSelf.emergencyContact !== prevUser.emergencyContact ||
-              latestSelf.password !== prevUser.password ||
-              latestSelf.username !== prevUser.username
-            ) {
-              return { ...prevUser, ...latestSelf };
-            }
+      // Auto-update currentUser session if user fields were modified in Firestore
+      setCurrentUser(prevUser => {
+        if (!prevUser) return null;
+        const latestSelf = list.find(u => u.id === prevUser.id);
+        if (latestSelf) {
+          if (
+            latestSelf.name !== prevUser.name ||
+            latestSelf.role !== prevUser.role ||
+            latestSelf.email !== prevUser.email ||
+            latestSelf.phone !== prevUser.phone ||
+            latestSelf.department !== prevUser.department ||
+            latestSelf.shift !== prevUser.shift ||
+            latestSelf.joinedDate !== prevUser.joinedDate ||
+            latestSelf.emergencyContact !== prevUser.emergencyContact ||
+            latestSelf.password !== prevUser.password ||
+            latestSelf.username !== prevUser.username
+          ) {
+            return { ...prevUser, ...latestSelf };
           }
-          return prevUser;
-        });
-      }
+        }
+        return prevUser;
+      });
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'users');
     });
 
     // 2. Sync Inventory
     const unsubInventory = onSnapshot(collection(db, 'inventory'), (snapshot) => {
-      if (snapshot.empty) {
-        // Seed initial inventory immediately
-        setInventory(INITIAL_INVENTORY);
-        INITIAL_INVENTORY.forEach(async (item) => {
-          await setDoc(doc(db, 'inventory', item.id), cleanUndefined(item));
-        });
-      } else {
-        const list: InventoryItem[] = [];
-        snapshot.forEach((docSnap) => {
-          const item = docSnap.data() as InventoryItem;
-          if (item.category === 'Linens' && item.section !== 'LINENS') {
-            const updated = { ...item, section: 'LINENS' as const };
-            setDoc(doc(db, 'inventory', item.id), cleanUndefined(updated));
-            list.push(updated);
-          } else {
-            list.push(item);
-          }
-        });
+      const list: InventoryItem[] = [];
+      snapshot.forEach((docSnap) => {
+        const item = docSnap.data() as InventoryItem;
+        if (item.category === 'Linens' && item.section !== 'LINENS') {
+          const updated = { ...item, section: 'LINENS' as const };
+          setDoc(doc(db, 'inventory', item.id), cleanUndefined(updated));
+          list.push(updated);
+        } else {
+          list.push(item);
+        }
+      });
 
-        setInventory(list);
-      }
+      setInventory(list);
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'inventory');
     });
 
     // 3. Sync Requisitions
     const unsubRequisitions = onSnapshot(collection(db, 'requisitions'), (snapshot) => {
-      if (snapshot.empty) {
-        // Seed initial requisitions immediately
-        setRequisitions(INITIAL_REQUISITIONS);
-        INITIAL_REQUISITIONS.forEach(async (req) => {
-          await setDoc(doc(db, 'requisitions', req.id), cleanUndefined(req));
-        });
-      } else {
-        const list: Requisition[] = [];
-        snapshot.forEach((doc) => {
-          list.push(doc.data() as Requisition);
-        });
-        // Sort requisitions by createdAt descending
-        list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        setRequisitions(list);
-      }
+      const list: Requisition[] = [];
+      snapshot.forEach((doc) => {
+        list.push(doc.data() as Requisition);
+      });
+      // Sort requisitions by createdAt descending
+      list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      setRequisitions(list);
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'requisitions');
     });
 
     // 4. Sync Audit Logs
     const unsubLogs = onSnapshot(collection(db, 'logs'), (snapshot) => {
-      if (snapshot.empty) {
-        // Seed initial logs
-        setLogs(INITIAL_LOGS);
-        INITIAL_LOGS.forEach(async (log) => {
-          await setDoc(doc(db, 'logs', log.id), cleanUndefined(log));
-        });
-      } else {
-        const list: AuditLog[] = [];
-        const oldLogs: AuditLog[] = [];
-        const now = Date.now();
-        const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
+      const list: AuditLog[] = [];
 
-        snapshot.forEach((docSnap) => {
-          const log = docSnap.data() as AuditLog;
-          const logTime = new Date(log.timestamp).getTime();
-          if (logTime < sevenDaysAgo) {
-            oldLogs.push(log);
-          } else {
-            list.push(log);
-          }
-        });
+      snapshot.forEach((docSnap) => {
+        const log = docSnap.data() as AuditLog;
+        list.push(log);
+      });
 
-        // Auto-delete stale logs older than 7 days in the background
-        if (oldLogs.length > 0) {
-          oldLogs.forEach(async (log) => {
-            try {
-              await deleteDoc(doc(db, 'logs', log.id));
-              console.log(`Automatically deleted log ${log.id} older than 7 days`);
-            } catch (err) {
-              console.error(`Failed to automatically delete log ${log.id}:`, err);
-            }
-          });
-        }
+      // NOTE: Automatic deletion of logs older than 7 days is temporarily disabled.
+      // All historic audit logs are retained in Firestore and displayed in the UI.
 
-        // Sort active logs by timestamp descending
-        list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-        setLogs(list);
-      }
+      // Sort active logs by timestamp descending
+      list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      setLogs(list);
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'logs');
     });
 
     // 5. Sync System Config
     const unsubConfigs = onSnapshot(collection(db, 'configs'), (snapshot) => {
-      if (snapshot.empty) {
-        // Seed defaults
-        const defaultCategories = [
-          'Meat & Poultry',
-          'Dairy',
-          'Produce',
-          'Oils & Spices',
-          'Dry Goods',
-          'Seafood',
-          'Bakery',
-          'Beverages',
-          'Linens',
-          'Toiletries',
-          'Cleaning Supplies',
-          'Other'
-        ];
-        setDoc(doc(db, 'configs', 'categories'), cleanUndefined({ values: defaultCategories }));
-        setDoc(doc(db, 'configs', 'logo'), cleanUndefined({ customLogo: null }));
-      } else {
-        snapshot.forEach((doc) => {
-          if (doc.id === 'categories') {
-            const vals = doc.data().values || [];
-            setCategories(vals);
-          } else if (doc.id === 'logo') {
-            const logoVal = doc.data().customLogo || null;
-            setCustomLogo(logoVal);
-            if (logoVal) {
-              try {
-                localStorage.setItem('madigun_custom_logo', logoVal);
-              } catch (e) {}
-            } else {
-              try {
-                localStorage.removeItem('madigun_custom_logo');
-              } catch (e) {}
-            }
+      snapshot.forEach((doc) => {
+        if (doc.id === 'categories') {
+          const vals = doc.data().values || [];
+          setCategories(vals);
+        } else if (doc.id === 'logo') {
+          const logoVal = doc.data().customLogo || null;
+          setCustomLogo(logoVal);
+          if (logoVal) {
+            try {
+              localStorage.setItem('madigun_custom_logo', logoVal);
+            } catch (e) {}
+          } else {
+            try {
+              localStorage.removeItem('madigun_custom_logo');
+            } catch (e) {}
           }
-        });
-      }
+        }
+      });
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'configs');
     });
@@ -359,20 +291,13 @@ export default function App() {
 
     // 7. Sync Rooms
     const unsubRooms = onSnapshot(collection(db, 'rooms'), (snapshot) => {
-      if (snapshot.empty) {
-        setRooms(INITIAL_ROOMS);
-        INITIAL_ROOMS.forEach(async (r) => {
-          await setDoc(doc(db, 'rooms', r.id), cleanUndefined(r));
-        });
-      } else {
-        const list: HotelRoom[] = [];
-        snapshot.forEach((docSnap) => {
-          list.push(docSnap.data() as HotelRoom);
-        });
-        // Sort rooms by room number numeric natural sort
-        list.sort((a, b) => a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true, sensitivity: 'base' }));
-        setRooms(list);
-      }
+      const list: HotelRoom[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push(docSnap.data() as HotelRoom);
+      });
+      // Sort rooms by room number numeric natural sort
+      list.sort((a, b) => a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true, sensitivity: 'base' }));
+      setRooms(list);
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'rooms');
     });
@@ -391,19 +316,12 @@ export default function App() {
 
     // 9. Sync Food Requisitions
     const unsubFoodReqs = onSnapshot(collection(db, 'foodRequisitions'), (snapshot) => {
-      if (snapshot.empty) {
-        setFoodRequisitions(INITIAL_FOOD_REQUISITIONS);
-        INITIAL_FOOD_REQUISITIONS.forEach(async (freq) => {
-          await setDoc(doc(db, 'foodRequisitions', freq.id), cleanUndefined(freq));
-        });
-      } else {
-        const list: FoodRequisition[] = [];
-        snapshot.forEach((docSnap) => {
-          list.push(docSnap.data() as FoodRequisition);
-        });
-        list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        setFoodRequisitions(list);
-      }
+      const list: FoodRequisition[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push(docSnap.data() as FoodRequisition);
+      });
+      list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      setFoodRequisitions(list);
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'foodRequisitions');
     });
@@ -435,7 +353,7 @@ export default function App() {
   useEffect(() => {
     if (currentUser) {
       const isFull = currentUser.role === 'admin' || currentUser.role === 'managing_director';
-      const adminOnlyTabs = ['accounts', 'logs'];
+      const adminOnlyTabs = ['accounts', 'logs', 'database'];
       if (!isFull && adminOnlyTabs.includes(activeTab)) {
         setActiveTab('dashboard');
       }
@@ -473,6 +391,85 @@ export default function App() {
     }
   };
 
+  // Category handler
+  const handleUpdateCategories = async (newCats: string[]) => {
+    try {
+      await setDoc(doc(db, 'configs', 'categories'), cleanUndefined({ values: newCats }));
+      if (currentUser) {
+        addLogEntry('Category Settings', `Updated categories (${newCats.length} active categories).`, currentUser);
+      }
+      setSyncFeedback('Categories updated successfully.');
+      setTimeout(() => setSyncFeedback(null), 3000);
+    } catch (e) {
+      console.error("Error updating categories:", e);
+      throw e;
+    }
+  };
+
+  // Restore Default Hotel Database & Initial Records
+  const handleRestoreDefaultData = async () => {
+    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'managing_director')) {
+      throw new Error('Unauthorized');
+    }
+    setIsRestoring(true);
+    try {
+      // 1. Users
+      for (const u of INITIAL_USERS) {
+        await setDoc(doc(db, 'users', u.id), cleanUndefined(u));
+      }
+      // 2. Inventory
+      for (const item of INITIAL_INVENTORY) {
+        await setDoc(doc(db, 'inventory', item.id), cleanUndefined(item));
+      }
+      // 3. Rooms
+      for (const r of INITIAL_ROOMS) {
+        await setDoc(doc(db, 'rooms', r.id), cleanUndefined(r));
+      }
+      // 4. Requisitions
+      for (const req of INITIAL_REQUISITIONS) {
+        await setDoc(doc(db, 'requisitions', req.id), cleanUndefined(req));
+      }
+      // 5. Food Requisitions
+      for (const freq of INITIAL_FOOD_REQUISITIONS) {
+        await setDoc(doc(db, 'foodRequisitions', freq.id), cleanUndefined(freq));
+      }
+      // 6. Logs
+      for (const log of INITIAL_LOGS) {
+        await setDoc(doc(db, 'logs', log.id), cleanUndefined(log));
+      }
+      // 7. System configs
+      const defaultCategories = [
+        'Meat & Poultry',
+        'Dairy',
+        'Produce',
+        'Oils & Spices',
+        'Dry Goods',
+        'Seafood',
+        'Bakery',
+        'Beverages',
+        'Linens',
+        'Toiletries',
+        'Cleaning Supplies',
+        'Other'
+      ];
+      await setDoc(doc(db, 'configs', 'categories'), cleanUndefined({ values: defaultCategories }));
+      await setDoc(doc(db, 'configs', 'logo'), cleanUndefined({ customLogo: null }));
+
+      await addLogEntry(
+        'Database Reset',
+        'Restored complete default Madigun Hotel database collections, products, rooms, and configuration settings.',
+        currentUser
+      );
+      setSyncFeedback('Default hotel database, accounts, and sample records successfully restored.');
+      setTimeout(() => setSyncFeedback(null), 5000);
+    } catch (err: any) {
+      console.error("Failed to restore default database:", err);
+      throw err;
+    } finally {
+      setIsRestoring(false);
+    }
+  };
+
   // Login handler
   const handleLogin = (user: User) => {
     setCurrentUser(user);
@@ -490,7 +487,7 @@ export default function App() {
   };
 
   // Register user
-  const handleRegisterUser = async (newUser: typeof INITIAL_USERS[0]) => {
+  const handleRegisterUser = async (newUser: User & { password?: string }) => {
     try {
       await setDoc(doc(db, 'users', newUser.id), cleanUndefined(newUser));
     } catch (e) {
@@ -1640,7 +1637,7 @@ export default function App() {
     e.target.value = '';
   };
 
-  // Unified Core Database Restore Engine (supports both file uploads and Google Drive backups)
+  // Unified Core Database Restore Engine (supports both file uploads and backups)
   const handleRestoreBackupData = async (data: any, mode: 'merge' | 'overwrite') => {
     if (!data || !currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'managing_director')) {
       throw new Error('Unauthorized or missing backup payload');
@@ -1650,109 +1647,142 @@ export default function App() {
     setRestoreSuccess(false);
 
     try {
+      // Helper to batch operations safely within Firestore 500-op limits
+      const commitOperations = async (ops: Array<(batch: any) => void>) => {
+        const CHUNK_SIZE = 400;
+        for (let i = 0; i < ops.length; i += CHUNK_SIZE) {
+          const chunk = ops.slice(i, i + CHUNK_SIZE);
+          const batch = writeBatch(db);
+          for (const op of chunk) {
+            op(batch);
+          }
+          await batch.commit();
+        }
+      };
+
+      const incomingUsers: any[] = Array.isArray(data.users) ? data.users : [];
+      const incomingInventory: any[] = Array.isArray(data.inventory) ? data.inventory : [];
+      const incomingRequisitions: any[] = Array.isArray(data.requisitions) ? data.requisitions : [];
+      const incomingFoodRequisitions: any[] = Array.isArray(data.foodRequisitions) 
+        ? data.foodRequisitions 
+        : (Array.isArray(data.food_requisitions) ? data.food_requisitions : []);
+      const incomingWithdrawals: any[] = Array.isArray(data.withdrawals) ? data.withdrawals : [];
+      const incomingRooms: any[] = Array.isArray(data.rooms) 
+        ? data.rooms 
+        : (Array.isArray(data.hotel_rooms) ? data.hotel_rooms : []);
+      const incomingDamageReports: any[] = Array.isArray(data.damageReports) 
+        ? data.damageReports 
+        : (Array.isArray(data.damage_reports) ? data.damage_reports : []);
+      const incomingLogs: any[] = Array.isArray(data.logs) 
+        ? data.logs 
+        : (Array.isArray(data.audit_logs) ? data.audit_logs : []);
+
       if (mode === 'overwrite') {
-        // Delete all current records in Firestore
-        const deletePromises: Promise<void>[] = [];
-        users.forEach(u => deletePromises.push(deleteDoc(doc(db, 'users', u.id))));
-        inventory.forEach(i => deletePromises.push(deleteDoc(doc(db, 'inventory', i.id))));
-        requisitions.forEach(r => deletePromises.push(deleteDoc(doc(db, 'requisitions', r.id))));
-        foodRequisitions.forEach(fr => deletePromises.push(deleteDoc(doc(db, 'food_requisitions', fr.id))));
-        withdrawals.forEach(w => deletePromises.push(deleteDoc(doc(db, 'withdrawals', w.id))));
-        rooms.forEach(rm => deletePromises.push(deleteDoc(doc(db, 'rooms', rm.id))));
-        damageReports.forEach(dr => deletePromises.push(deleteDoc(doc(db, 'damageReports', dr.id))));
-        logs.forEach(l => deletePromises.push(deleteDoc(doc(db, 'logs', l.id))));
-        await Promise.all(deletePromises);
+        // Delete current records in Firestore via batched deletes
+        const deleteOps: Array<(batch: any) => void> = [];
+        
+        // Only delete users if incoming backup contains user accounts, and keep currentUser safe
+        if (incomingUsers.length > 0) {
+          users.forEach(u => deleteOps.push(b => b.delete(doc(db, 'users', u.id))));
+        }
+        inventory.forEach(i => deleteOps.push(b => b.delete(doc(db, 'inventory', i.id))));
+        requisitions.forEach(r => deleteOps.push(b => b.delete(doc(db, 'requisitions', r.id))));
+        foodRequisitions.forEach(fr => deleteOps.push(b => b.delete(doc(db, 'foodRequisitions', fr.id))));
+        withdrawals.forEach(w => deleteOps.push(b => b.delete(doc(db, 'withdrawals', w.id))));
+        rooms.forEach(rm => deleteOps.push(b => b.delete(doc(db, 'rooms', rm.id))));
+        damageReports.forEach(dr => deleteOps.push(b => b.delete(doc(db, 'damageReports', dr.id))));
+        logs.forEach(l => deleteOps.push(b => b.delete(doc(db, 'logs', l.id))));
+
+        if (deleteOps.length > 0) {
+          await commitOperations(deleteOps);
+        }
       }
 
-      // Restoring users
-      if (Array.isArray(data.users)) {
-        for (const u of data.users) {
+      // Prepare insertion operations
+      const insertOps: Array<(batch: any) => void> = [];
+
+      // 1. Restoring users (preserve currentUser session)
+      if (incomingUsers.length > 0) {
+        const hasCurrentUser = incomingUsers.some(u => u.id === currentUser.id || (u.username && u.username.toLowerCase() === currentUser.username?.toLowerCase()));
+        const usersToSave = hasCurrentUser ? incomingUsers : [currentUser, ...incomingUsers];
+
+        for (const u of usersToSave) {
           if (mode === 'merge') {
             const exists = users.some(existing => existing.id === u.id || (u.username && existing.username.toLowerCase() === u.username.toLowerCase()));
             if (exists) continue;
           }
-          await setDoc(doc(db, 'users', u.id), cleanUndefined(u));
+          insertOps.push(b => b.set(doc(db, 'users', u.id), cleanUndefined(u)));
         }
       }
 
-      // Restoring inventory
-      if (Array.isArray(data.inventory)) {
-        for (const i of data.inventory) {
-          if (mode === 'merge') {
-            const exists = inventory.some(existing => existing.id === i.id || (i.name && existing.name.toLowerCase().trim() === i.name.toLowerCase().trim()));
-            if (exists) continue;
-          }
-          await setDoc(doc(db, 'inventory', i.id), cleanUndefined(i));
+      // 2. Restoring inventory
+      for (const i of incomingInventory) {
+        if (mode === 'merge') {
+          const exists = inventory.some(existing => existing.id === i.id || (i.name && existing.name.toLowerCase().trim() === i.name.toLowerCase().trim()));
+          if (exists) continue;
         }
+        insertOps.push(b => b.set(doc(db, 'inventory', i.id), cleanUndefined(i)));
       }
 
-      // Restoring requisitions
-      if (Array.isArray(data.requisitions)) {
-        for (const r of data.requisitions) {
-          if (mode === 'merge') {
-            const exists = requisitions.some(existing => existing.id === r.id || existing.requisitionNumber === r.requisitionNumber);
-            if (exists) continue;
-          }
-          await setDoc(doc(db, 'requisitions', r.id), cleanUndefined(r));
+      // 3. Restoring requisitions
+      for (const r of incomingRequisitions) {
+        if (mode === 'merge') {
+          const exists = requisitions.some(existing => existing.id === r.id || existing.requisitionNumber === r.requisitionNumber);
+          if (exists) continue;
         }
+        insertOps.push(b => b.set(doc(db, 'requisitions', r.id), cleanUndefined(r)));
       }
 
-      // Restoring food requisitions
-      if (Array.isArray(data.foodRequisitions)) {
-        for (const fr of data.foodRequisitions) {
-          if (mode === 'merge') {
-            const exists = foodRequisitions.some(existing => existing.id === fr.id || existing.requisitionNumber === fr.requisitionNumber);
-            if (exists) continue;
-          }
-          await setDoc(doc(db, 'food_requisitions', fr.id), cleanUndefined(fr));
+      // 4. Restoring food requisitions
+      for (const fr of incomingFoodRequisitions) {
+        if (mode === 'merge') {
+          const exists = foodRequisitions.some(existing => existing.id === fr.id || existing.requisitionNumber === fr.requisitionNumber);
+          if (exists) continue;
         }
+        insertOps.push(b => b.set(doc(db, 'foodRequisitions', fr.id), cleanUndefined(fr)));
       }
 
-      // Restoring withdrawals
-      if (Array.isArray(data.withdrawals)) {
-        for (const w of data.withdrawals) {
-          if (mode === 'merge') {
-            const exists = withdrawals.some(existing => existing.id === w.id || existing.withdrawalNumber === w.withdrawalNumber);
-            if (exists) continue;
-          }
-          await setDoc(doc(db, 'withdrawals', w.id), cleanUndefined(w));
+      // 5. Restoring withdrawals
+      for (const w of incomingWithdrawals) {
+        if (mode === 'merge') {
+          const exists = withdrawals.some(existing => existing.id === w.id || existing.withdrawalNumber === w.withdrawalNumber);
+          if (exists) continue;
         }
+        insertOps.push(b => b.set(doc(db, 'withdrawals', w.id), cleanUndefined(w)));
       }
 
-      // Restoring rooms
-      if (Array.isArray(data.rooms)) {
-        for (const rm of data.rooms) {
-          if (mode === 'merge') {
-            const exists = rooms.some(existing => existing.id === rm.id || existing.roomNumber === rm.roomNumber);
-            if (exists) continue;
-          }
-          await setDoc(doc(db, 'rooms', rm.id), cleanUndefined(rm));
+      // 6. Restoring rooms
+      for (const rm of incomingRooms) {
+        if (mode === 'merge') {
+          const exists = rooms.some(existing => existing.id === rm.id || existing.roomNumber === rm.roomNumber);
+          if (exists) continue;
         }
+        insertOps.push(b => b.set(doc(db, 'rooms', rm.id), cleanUndefined(rm)));
       }
 
-      // Restoring damageReports
-      if (Array.isArray(data.damageReports)) {
-        for (const dr of data.damageReports) {
-          if (mode === 'merge') {
-            const exists = damageReports.some(existing => existing.id === dr.id || existing.reportNumber === dr.reportNumber);
-            if (exists) continue;
-          }
-          await setDoc(doc(db, 'damageReports', dr.id), cleanUndefined(dr));
+      // 7. Restoring damage reports
+      for (const dr of incomingDamageReports) {
+        if (mode === 'merge') {
+          const exists = damageReports.some(existing => existing.id === dr.id || existing.reportNumber === dr.reportNumber);
+          if (exists) continue;
         }
+        insertOps.push(b => b.set(doc(db, 'damageReports', dr.id), cleanUndefined(dr)));
       }
 
-      // Restoring logs
-      if (Array.isArray(data.logs)) {
-        for (const l of data.logs) {
-          if (mode === 'merge') {
-            const exists = logs.some(existing => existing.id === l.id);
-            if (exists) continue;
-          }
-          await setDoc(doc(db, 'logs', l.id), cleanUndefined(l));
+      // 8. Restoring logs
+      for (const l of incomingLogs) {
+        if (mode === 'merge') {
+          const exists = logs.some(existing => existing.id === l.id);
+          if (exists) continue;
         }
+        insertOps.push(b => b.set(doc(db, 'logs', l.id), cleanUndefined(l)));
       }
 
-      // Restoring configs
+      if (insertOps.length > 0) {
+        await commitOperations(insertOps);
+      }
+
+      // 9. Restoring configs (categories and logo)
       if (data.configs) {
         if (Array.isArray(data.configs.categories)) {
           let targetCategories = data.configs.categories;
@@ -1784,7 +1814,7 @@ export default function App() {
       setRestoreSuccess(true);
       setImportedData(null);
     } catch (err: any) {
-      console.error(err);
+      console.error("Error restoring database backup:", err);
       setImportError(`Failed to restore data: ${err.message || err}`);
       throw err;
     } finally {
@@ -1795,7 +1825,12 @@ export default function App() {
   // Execute restore in selected mode from local upload
   const handleExecuteRestore = async (mode: 'merge' | 'overwrite') => {
     if (!importedData) return;
-    await handleRestoreBackupData(importedData, mode);
+    try {
+      await handleRestoreBackupData(importedData, mode);
+      setShowConfirmLogsOverwrite(false);
+    } catch (err) {
+      console.error("Failed to restore data:", err);
+    }
   };
 
   // Trigger automated restock requisition
@@ -1947,16 +1982,16 @@ export default function App() {
 
               {isFullAccessUser && (
                 <button
-                  onClick={() => setActiveTab('drive')}
+                  onClick={() => setActiveTab('database')}
                   className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold tracking-tight transition-all cursor-pointer ${
-                    activeTab === 'drive' 
+                    activeTab === 'database' 
                       ? 'bg-[#3E312C] text-white shadow-xs' 
                       : 'text-[#8C7A6B] hover:bg-[#EBE6DD] hover:text-[#3E312C]'
                   }`}
-                  id="drive-desktop-tab"
+                  id="database-desktop-tab"
                 >
-                  <HardDrive className="h-4 w-4 text-amber-600" />
-                  Google Drive
+                  <Database className="h-4 w-4 text-amber-600" />
+                  Database Settings
                 </button>
               )}
 
@@ -2084,12 +2119,12 @@ export default function App() {
         </button>
         {isFullAccessUser && (
           <button 
-            onClick={() => setActiveTab('drive')} 
-            className={`flex flex-col items-center justify-center min-w-[56px] min-h-[44px] px-2 py-1 rounded-xl text-[10px] font-bold transition-all ${activeTab === 'drive' ? 'bg-[#3E312C] text-white shadow-2xs' : 'text-[#8C7A6B] hover:bg-[#EBE6DD]'}`}
-            id="drive-mobile-tab"
+            onClick={() => setActiveTab('database')} 
+            className={`flex flex-col items-center justify-center min-w-[56px] min-h-[44px] px-2 py-1 rounded-xl text-[10px] font-bold transition-all ${activeTab === 'database' ? 'bg-[#3E312C] text-white shadow-2xs' : 'text-[#8C7A6B] hover:bg-[#EBE6DD]'}`}
+            id="database-mobile-tab"
           >
-            <HardDrive className={`h-4 w-4 ${activeTab === 'drive' ? 'text-amber-300' : 'text-amber-600'}`} />
-            <span>Drive</span>
+            <Database className={`h-4 w-4 ${activeTab === 'database' ? 'text-amber-300' : 'text-amber-600'}`} />
+            <span>Database</span>
           </button>
         )}
         {isFullAccessUser && (
@@ -2209,8 +2244,8 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'drive' && isFullAccessUser && (
-          <GoogleDriveStorage
+        {activeTab === 'database' && isFullAccessUser && (
+          <DatabaseSettings
             currentUser={currentUser}
             users={users}
             inventory={inventory}
@@ -2222,7 +2257,13 @@ export default function App() {
             logs={logs}
             categories={categories}
             customLogo={customLogo}
+            onUpdateLogo={handleUpdateLogo}
+            onUpdateCategories={handleUpdateCategories}
+            onExportBackup={handleExportBackup}
             onRestoreBackupData={handleRestoreBackupData}
+            onRestoreDefaultData={handleRestoreDefaultData}
+            onClearCaches={clearCachesAndVerifyServerConnection}
+            onNavigateToLogs={() => setActiveTab('logs')}
             onLogAudit={(action, details) => addLogEntry(action, details, currentUser)}
           />
         )}
@@ -2250,12 +2291,12 @@ export default function App() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button
-                    onClick={() => setActiveTab('drive')}
+                    onClick={() => setActiveTab('database')}
                     className="flex items-center gap-1.5 bg-[#8C7355] hover:bg-[#745E44] text-white text-xs font-semibold px-4 py-2.5 rounded-full transition-colors cursor-pointer shadow-2xs"
-                    title="Open Google Drive Cloud Storage & Backups"
+                    title="Open Database Settings & Recovery"
                   >
-                    <HardDrive className="h-3.5 w-3.5 text-amber-200" />
-                    Google Drive Backups
+                    <Database className="h-3.5 w-3.5 text-amber-200" />
+                    Database Settings
                   </button>
                   <button
                     onClick={handleExportBackup}
@@ -2323,17 +2364,15 @@ export default function App() {
                       {isRestoring ? 'Restoring...' : 'Safely Merge (Add & Update Only)'}
                     </button>
                     <button
+                      type="button"
                       disabled={isRestoring}
-                      onClick={() => {
-                        if (confirm("WARNING: This will delete ALL current database records in Firestore and replace them with the backup data. Are you sure?")) {
-                          handleExecuteRestore('overwrite');
-                        }
-                      }}
+                      onClick={() => setShowConfirmLogsOverwrite(true)}
                       className="flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-semibold text-xs py-2.5 px-4 rounded-xl transition-all cursor-pointer shadow-3xs"
                     >
                       {isRestoring ? 'Restoring...' : 'Delete All Data & Restore (Overwriting)'}
                     </button>
                     <button
+                      type="button"
                       disabled={isRestoring}
                       onClick={() => setImportedData(null)}
                       className="bg-transparent hover:bg-[#EBE6DD] border border-[#E6E4DD] text-[#8C7A6B] font-semibold text-xs py-2.5 px-4 rounded-xl transition-all cursor-pointer"
@@ -2341,6 +2380,42 @@ export default function App() {
                       Cancel
                     </button>
                   </div>
+
+                  {showConfirmLogsOverwrite && (
+                    <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn">
+                      <div className="bg-white rounded-3xl max-w-md w-full p-6 border border-[#E6E4DD] shadow-2xl space-y-4">
+                        <div className="flex items-start gap-3">
+                          <div className="p-2.5 bg-rose-100 text-rose-800 rounded-2xl shrink-0">
+                            <AlertTriangle className="h-6 w-6 text-rose-700" />
+                          </div>
+                          <div>
+                            <h3 className="text-base font-bold text-[#3E312C]">Confirm Full Database Overwrite</h3>
+                            <p className="text-xs text-[#8C7A6B] mt-1 leading-relaxed">
+                              WARNING: This will delete ALL current database records in Firestore and replace them with the backup data. Are you sure you want to proceed?
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#F0EFE9]">
+                          <button
+                            type="button"
+                            onClick={() => setShowConfirmLogsOverwrite(false)}
+                            disabled={isRestoring}
+                            className="px-4 py-2 text-xs font-semibold text-[#8C7A6B] hover:text-[#3E312C] rounded-xl cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleExecuteRestore('overwrite')}
+                            disabled={isRestoring}
+                            className="px-4 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-xl cursor-pointer"
+                          >
+                            {isRestoring ? 'Overwriting...' : 'Yes, Delete & Overwrite'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

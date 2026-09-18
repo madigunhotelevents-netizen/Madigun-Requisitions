@@ -51,8 +51,9 @@ export function FoodRequisitions({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingReq, setEditingReq] = useState<FoodRequisition | null>(null);
 
-  // Delete Modal State
+  // Delete & Reject Modal State
   const [reqToDelete, setReqToDelete] = useState<FoodRequisition | null>(null);
+  const [reqToReject, setReqToReject] = useState<FoodRequisition | null>(null);
 
   // Form Fields
   const [requestingDept, setRequestingDept] = useState('Kitchen / F&B Operations');
@@ -685,11 +686,8 @@ export function FoodRequisitions({
                           </button>
 
                           <button
-                            onClick={() => {
-                              if (window.confirm('Reject this food requisition?')) {
-                                onUpdateStatus(req.id, 'rejected');
-                              }
-                            }}
+                            type="button"
+                            onClick={() => setReqToReject(req)}
                             className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-800 hover:bg-rose-900 text-white rounded-xl text-xs font-bold cursor-pointer transition-all shadow-2xs"
                           >
                             <XCircle className="h-3.5 w-3.5" />
@@ -946,6 +944,47 @@ export function FoodRequisitions({
                 className="px-4 py-2 bg-rose-700 hover:bg-rose-800 text-white rounded-xl text-xs font-bold transition-all shadow-2xs cursor-pointer"
               >
                 Yes, Delete Requisition
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reject Confirmation Modal */}
+      {reqToReject && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-[#DFD9D0] animate-in fade-in zoom-in duration-150">
+            <div className="flex items-center gap-3 text-rose-700 mb-3">
+              <div className="p-2.5 bg-rose-100 rounded-xl">
+                <XCircle className="h-6 w-6 text-rose-600" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-[#3E312C]">Reject Food Requisition</h3>
+                <p className="text-xs text-[#8C7A6B] font-medium">{reqToReject.requisitionNumber}</p>
+              </div>
+            </div>
+            
+            <p className="text-xs text-[#52433D] mb-5 leading-relaxed">
+              Are you sure you want to reject this food & meal requisition for <strong>{reqToReject.eventOrPurpose}</strong>?
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-[#DFD9D0]">
+              <button
+                type="button"
+                onClick={() => setReqToReject(null)}
+                className="px-4 py-2 bg-white hover:bg-[#EBE6DD] border border-[#DFD9D0] text-[#3E312C] rounded-xl text-xs font-bold transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onUpdateStatus(reqToReject.id, 'rejected');
+                  setReqToReject(null);
+                }}
+                className="px-4 py-2 bg-rose-700 hover:bg-rose-800 text-white rounded-xl text-xs font-bold transition-all shadow-2xs cursor-pointer"
+              >
+                Yes, Reject Requisition
               </button>
             </div>
           </div>
