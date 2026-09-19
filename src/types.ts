@@ -257,3 +257,42 @@ export interface DamageReport {
   replacementRequisitionId?: string;
   isDeleted?: boolean;
 }
+
+export interface EquipmentIssuanceItem {
+  id: string;
+  name: string;
+  category: string;
+  quantity: number;
+  unit: string;
+  unitCost: number;
+  totalCost: number;
+  serialNumber?: string;
+  propertyCode?: string;
+  brandModel?: string;
+  condition: 'Brand New' | 'Good / Operational' | 'Refurbished' | 'Fair';
+  specifications?: string;
+  existingInventoryId?: string;
+}
+
+export interface EquipmentIssuance {
+  id: string;
+  issuanceNumber: string;
+  date: string;
+  recipientName: string;
+  recipientDepartment: string;
+  recipientPosition?: string;
+  recipientContact?: string;
+  targetSection: InventorySection;
+  issuedBy: string;
+  issuedByName: string;
+  source: string;
+  purpose: string;
+  status: 'ISSUED' | 'RETURNED' | 'ACKNOWLEDGED';
+  remarks?: string;
+  items: EquipmentIssuanceItem[];
+  totalAmount: number;
+  autoAddedToInventory: boolean;
+  createdAt: string;
+  updatedAt?: string;
+  isDeleted?: boolean;
+}

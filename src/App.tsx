@@ -21,7 +21,8 @@ import {
   ShieldAlert,
   Utensils,
   Check,
-  HardDrive
+  HardDrive,
+  PackagePlus
 } from 'lucide-react';
 import { 
   User, 
@@ -39,7 +40,9 @@ import {
   DamageReportItem,
   DamageStatus,
   FoodRequisition,
-  FoodRequisitionStatus
+  FoodRequisitionStatus,
+  EquipmentIssuance,
+  EquipmentIssuanceItem
 } from './types';
 import { 
   INITIAL_USERS, 
@@ -51,13 +54,14 @@ import {
 } from './data';
 import Auth from './components/Auth';
 import Dashboard from './components/Dashboard';
-import Inventory from './components/Inventory';
+import Inventory, { getSectionName } from './components/Inventory';
 import Requisitions from './components/Requisitions';
 import Withdrawals from './components/Withdrawals';
 import DamageReports from './components/DamageReports';
 import { FoodRequisitions } from './components/FoodRequisitions';
 import Users from './components/Users';
 import { DatabaseSettings } from './components/DatabaseSettings';
+import EquipmentIssuanceComponent from './components/EquipmentIssuance';
 import MadigunLogo from './components/MadigunLogo';
 import { db, handleFirestoreError, OperationType, clearCachesAndVerifyServerConnection } from './firebase';
 import { collection, onSnapshot, setDoc, doc, deleteDoc, writeBatch } from 'firebase/firestore';
@@ -116,6 +120,7 @@ export default function App() {
   const [rooms, setRooms] = useState<HotelRoom[]>([]);
   const [damageReports, setDamageReports] = useState<DamageReport[]>([]);
   const [foodRequisitions, setFoodRequisitions] = useState<FoodRequisition[]>([]);
+  const [equipmentIssuances, setEquipmentIssuances] = useState<EquipmentIssuance[]>([]);
 
   const [categories, setCategories] = useState<string[]>([
     'Meat & Poultry',
@@ -326,6 +331,18 @@ export default function App() {
       handleFirestoreError(error, OperationType.GET, 'foodRequisitions');
     });
 
+    // 10. Sync Equipment Issuances
+    const unsubEquipmentIssuances = onSnapshot(collection(db, 'equipmentIssuances'), (snapshot) => {
+      const list: EquipmentIssuance[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push(docSnap.data() as EquipmentIssuance);
+      });
+      list.sort((a, b) => new Date(b.date || b.createdAt).getTime() - new Date(a.date || a.createdAt).getTime());
+      setEquipmentIssuances(list);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'equipmentIssuances');
+    });
+
     return () => {
       unsubUsers();
       unsubInventory();
@@ -336,6 +353,7 @@ export default function App() {
       unsubRooms();
       unsubDamageReports();
       unsubFoodReqs();
+      unsubEquipmentIssuances();
     };
   }, []);
 
@@ -1547,6 +1565,96 @@ export default function App() {
     }
   };
 
+  // --- Equipment Issuance / Releasing Handlers ---
+  const handleCreateEquipmentIssuance = async (
+    issuanceData: Omit<EquipmentIssuance, 'id' | 'createdAt'>
+  ) => {
+    if (!currentUser) return;
+    const newIssuance: EquipmentIssuance = {
+      ...issuanceData,
+      id: `issuance-${Date.now()}`,
+      createdAt: new Date().toISOString()
+    };
+
+    try {
+      // 1. Save Issuance Record in Firestore
+      await setDoc(doc(db, 'equipmentIssuances', newIssuance.id), cleanUndefined(newIssuance));
+
+      // 2. Automatically credit/add items to the selected department's inventory
+      if (newIssuance.autoAddedToInventory && newIssuance.items?.length > 0) {
+        for (const item of newIssuance.items) {
+          const normalizedName = item.name.trim().toLowerCase();
+          const existing = inventory.find(
+            i => (i.section || 'KITCHEN') === newIssuance.targetSection &&
+                 i.name.trim().toLowerCase() === normalizedName
+          );
+
+          if (existing) {
+            const updatedItem: InventoryItem = {
+              ...existing,
+              currentStock: existing.currentStock + item.quantity,
+              unitCost: item.unitCost > 0 ? item.unitCost : existing.unitCost,
+              lastUpdated: new Date().toISOString(),
+              auditRemarks: `Restocked +${item.quantity} ${item.unit} via Equipment Issuance (${newIssuance.issuanceNumber}) to ${newIssuance.recipientName}`
+            };
+            await setDoc(doc(db, 'inventory', existing.id), cleanUndefined(updatedItem));
+          } else {
+            const newItem: InventoryItem = {
+              id: `inv-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+              name: item.name.trim(),
+              category: item.category || 'Equipment',
+              currentStock: item.quantity,
+              unit: item.unit || 'pcs',
+              unitCost: item.unitCost || 0,
+              minStock: 1,
+              supplier: newIssuance.source || 'Direct Issuance (Non-P.R.)',
+              lastUpdated: new Date().toISOString(),
+              section: newIssuance.targetSection,
+              lastAuditDate: new Date().toISOString().split('T')[0],
+              auditRemarks: `Directly issued to ${newIssuance.recipientName} (${newIssuance.recipientDepartment || getSectionName(newIssuance.targetSection)}) via Issuance Slip ${newIssuance.issuanceNumber}`
+            };
+            await setDoc(doc(db, 'inventory', newItem.id), cleanUndefined(newItem));
+          }
+        }
+      }
+
+      // 3. Log to audit trail
+      await addLogEntry(
+        'Equipment Issuance / Releasing',
+        `Issued ${newIssuance.items.length} item(s) (Ref: ${newIssuance.issuanceNumber}) to ${newIssuance.recipientName} for ${getSectionName(newIssuance.targetSection)}. Items automatically added to department inventory.`,
+        currentUser
+      );
+
+      setSyncFeedback(`Equipment issuance ${newIssuance.issuanceNumber} recorded. Items added to ${getSectionName(newIssuance.targetSection)} inventory.`);
+      setTimeout(() => setSyncFeedback(null), 5000);
+    } catch (e: any) {
+      console.error("Error creating equipment issuance:", e);
+      handleFirestoreError(e, OperationType.WRITE, 'equipmentIssuances');
+      throw e;
+    }
+  };
+
+  const handleDeleteEquipmentIssuance = async (issuanceId: string) => {
+    if (!currentUser) return;
+    const target = equipmentIssuances.find(i => i.id === issuanceId);
+    try {
+      await deleteDoc(doc(db, 'equipmentIssuances', issuanceId));
+      if (target) {
+        addLogEntry(
+          'Voided Equipment Issuance',
+          `Deleted issuance record ${target.issuanceNumber} (${target.items.length} items issued to ${target.recipientName})`,
+          currentUser
+        );
+      }
+      setSyncFeedback('Equipment issuance record deleted.');
+      setTimeout(() => setSyncFeedback(null), 3000);
+    } catch (e: any) {
+      console.error("Error deleting equipment issuance:", e);
+      handleFirestoreError(e, OperationType.DELETE, 'equipmentIssuances');
+      throw e;
+    }
+  };
+
   // Delete Individual Audit Log Entry
   const handleDeleteLog = async (logId: string) => {
     if (!currentUser || currentUser.role !== 'admin') return;
@@ -1980,6 +2088,19 @@ export default function App() {
                 Damaged Items
               </button>
 
+              <button
+                onClick={() => setActiveTab('equipment_issuance')}
+                className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold tracking-tight transition-all cursor-pointer ${
+                  activeTab === 'equipment_issuance' 
+                    ? 'bg-[#3E312C] text-white shadow-xs' 
+                    : 'text-[#8C7A6B] hover:bg-[#EBE6DD] hover:text-[#3E312C]'
+                }`}
+                id="equipment-issuance-desktop-tab"
+              >
+                <PackagePlus className="h-4 w-4 text-emerald-600" />
+                Equipment Issuance
+              </button>
+
               {isFullAccessUser && (
                 <button
                   onClick={() => setActiveTab('database')}
@@ -2117,6 +2238,14 @@ export default function App() {
           <ShieldAlert className={`h-4 w-4 ${activeTab === 'damage_reports' ? 'text-rose-300' : 'text-rose-600'}`} />
           <span>Damaged</span>
         </button>
+        <button 
+          onClick={() => setActiveTab('equipment_issuance')} 
+          className={`flex flex-col items-center justify-center min-w-[56px] min-h-[44px] px-2 py-1 rounded-xl text-[10px] font-bold transition-all ${activeTab === 'equipment_issuance' ? 'bg-[#3E312C] text-white shadow-2xs' : 'text-[#8C7A6B] hover:bg-[#EBE6DD]'}`}
+          id="equipment-issuance-mobile-tab"
+        >
+          <PackagePlus className={`h-4 w-4 ${activeTab === 'equipment_issuance' ? 'text-emerald-300' : 'text-emerald-600'}`} />
+          <span>Issuance</span>
+        </button>
         {isFullAccessUser && (
           <button 
             onClick={() => setActiveTab('database')} 
@@ -2241,6 +2370,19 @@ export default function App() {
             onUpdateReportStatus={handleUpdateDamageReportStatus}
             onDeleteReport={handleDeleteDamageReport}
             onRequestReplacementPR={handleRequestReplacementPR}
+          />
+        )}
+
+        {activeTab === 'equipment_issuance' && (
+          <EquipmentIssuanceComponent
+            issuances={equipmentIssuances}
+            inventory={inventory}
+            users={users}
+            currentUser={currentUser}
+            categories={categories}
+            onCreateIssuance={handleCreateEquipmentIssuance}
+            onDeleteIssuance={handleDeleteEquipmentIssuance}
+            customLogo={customLogo}
           />
         )}
 
