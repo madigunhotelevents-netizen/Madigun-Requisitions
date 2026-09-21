@@ -99,9 +99,49 @@ export default function Withdrawals({
   const [reportSearchTerm, setReportSearchTerm] = useState('');
   const [reportSectionFilter, setReportSectionFilter] = useState('ALL');
   const [reportStatusFilter, setReportStatusFilter] = useState<'completed' | 'all' | 'pending'>('completed');
-  const [reportDateRange, setReportDateRange] = useState<'all' | '7days' | '30days' | 'this_month'>('all');
+  const [reportDateRange, setReportDateRange] = useState<
+    'all' | 'today' | 'yesterday' | 'this_week' | 'this_month' | 'last_month' | 'this_year' | '7days' | '30days' | 'custom'
+  >('all');
+  const [reportStartDate, setReportStartDate] = useState('');
+  const [reportEndDate, setReportEndDate] = useState('');
   const [reportViewMode, setReportViewMode] = useState<'items' | 'slips'>('items');
   const [expandedReportSlipId, setExpandedReportSlipId] = useState<string | null>(null);
+
+  // Formatted date filter label for UI badges and PDF/CSV exports
+  const getReportDateFilterLabel = () => {
+    if (reportDateRange === 'all') return 'All Time (All Dates)';
+    const now = new Date();
+    if (reportDateRange === 'today') {
+      return `Today (${now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })})`;
+    }
+    if (reportDateRange === 'yesterday') {
+      const y = new Date();
+      y.setDate(y.getDate() - 1);
+      return `Yesterday (${y.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })})`;
+    }
+    if (reportDateRange === 'this_week') return 'This Week';
+    if (reportDateRange === 'this_month') {
+      return `This Month (${now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })})`;
+    }
+    if (reportDateRange === 'last_month') {
+      const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      return `Last Month (${lm.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })})`;
+    }
+    if (reportDateRange === 'this_year') {
+      return `This Year (${now.getFullYear()})`;
+    }
+    if (reportDateRange === '7days') return 'Last 7 Days';
+    if (reportDateRange === '30days') return 'Last 30 Days';
+    if (reportDateRange === 'custom') {
+      if (reportStartDate && reportEndDate) {
+        return `${reportStartDate} to ${reportEndDate}`;
+      }
+      if (reportStartDate) return `From ${reportStartDate}`;
+      if (reportEndDate) return `Until ${reportEndDate}`;
+      return 'Custom Date Range';
+    }
+    return 'All Time';
+  };
 
   // Source section / tab selector state
   const [selectedSourceTab, setSelectedSourceTab] = useState<string>('ALL');
@@ -548,19 +588,48 @@ export default function Withdrawals({
 
       // Date range filter
       if (reportDateRange !== 'all') {
-        const slipTime = new Date(wd.createdAt).getTime();
-        const now = Date.now();
-        if (reportDateRange === '7days' && (now - slipTime > 7 * 24 * 60 * 60 * 1000)) return false;
-        if (reportDateRange === '30days' && (now - slipTime > 30 * 24 * 60 * 60 * 1000)) return false;
-        if (reportDateRange === 'this_month') {
-          const slipDate = new Date(wd.createdAt);
-          const curDate = new Date();
-          if (slipDate.getMonth() !== curDate.getMonth() || slipDate.getFullYear() !== curDate.getFullYear()) return false;
+        const slipDate = new Date(wd.createdAt);
+        if (isNaN(slipDate.getTime())) return true;
+        const slipTime = slipDate.getTime();
+        const now = new Date();
+
+        const year = slipDate.getFullYear();
+        const month = String(slipDate.getMonth() + 1).padStart(2, '0');
+        const day = String(slipDate.getDate()).padStart(2, '0');
+        const slipDateStr = `${year}-${month}-${day}`;
+
+        if (reportDateRange === 'today') {
+          const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+          if (slipDateStr !== todayStr) return false;
+        } else if (reportDateRange === 'yesterday') {
+          const y = new Date();
+          y.setDate(y.getDate() - 1);
+          const yStr = `${y.getFullYear()}-${String(y.getMonth() + 1).padStart(2, '0')}-${String(y.getDate()).padStart(2, '0')}`;
+          if (slipDateStr !== yStr) return false;
+        } else if (reportDateRange === 'this_week') {
+          const dayOfWeek = now.getDay();
+          const diff = now.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+          const monday = new Date(now.getFullYear(), now.getMonth(), diff, 0, 0, 0, 0);
+          if (slipTime < monday.getTime()) return false;
+        } else if (reportDateRange === 'this_month') {
+          if (slipDate.getMonth() !== now.getMonth() || slipDate.getFullYear() !== now.getFullYear()) return false;
+        } else if (reportDateRange === 'last_month') {
+          const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+          if (slipDate.getMonth() !== lastMonth.getMonth() || slipDate.getFullYear() !== lastMonth.getFullYear()) return false;
+        } else if (reportDateRange === 'this_year') {
+          if (slipDate.getFullYear() !== now.getFullYear()) return false;
+        } else if (reportDateRange === '7days') {
+          if (now.getTime() - slipTime > 7 * 24 * 60 * 60 * 1000) return false;
+        } else if (reportDateRange === '30days') {
+          if (now.getTime() - slipTime > 30 * 24 * 60 * 60 * 1000) return false;
+        } else if (reportDateRange === 'custom') {
+          if (reportStartDate && slipDateStr < reportStartDate) return false;
+          if (reportEndDate && slipDateStr > reportEndDate) return false;
         }
       }
       return true;
     });
-  }, [withdrawals, reportStatusFilter, reportDateRange]);
+  }, [withdrawals, reportStatusFilter, reportDateRange, reportStartDate, reportEndDate]);
 
   // Aggregated withdrawn items and overall value across all matching withdrawals
   const aggregatedWithdrawnItems = useMemo(() => {
@@ -753,7 +822,7 @@ export default function Withdrawals({
       doc.setFont("helvetica", "normal");
       doc.setFontSize(8);
       const statusLabel = reportStatusFilter === 'completed' ? 'Completed & Disbursed Slips' : reportStatusFilter === 'pending' ? 'Pending / Approved Requests' : 'All Recorded Slips';
-      doc.text(`Scope: ${statusLabel} (${withdrawalReportSummary.totalSlips} Slips • ${filteredWithdrawnItems.length} Products | Sorted: Highest to Lowest Qty Disbursed) | Generated: ${new Date().toLocaleDateString('en-US', { dateStyle: 'medium' })}`, 15, 41);
+      doc.text(`Period: ${getReportDateFilterLabel()} | Scope: ${statusLabel} (${withdrawalReportSummary.totalSlips} Slips • ${filteredWithdrawnItems.length} Products | Sorted: Highest to Lowest Qty Disbursed)`, 15, 41);
       doc.text(`Audited By: ${currentUser.name} (${currentUser.role.toUpperCase()})`, 195, 41, { align: 'right' });
 
       // AutoTable
@@ -856,6 +925,7 @@ export default function Withdrawals({
     const lines = [
       `"MADIGUN HOTEL AND EVENTS - CONSOLIDATED WITHDRAWN ITEMS & OVERALL VALUE REPORT"`,
       `"Scope:","${reportStatusFilter === 'completed' ? 'Completed Disbursed Slips' : 'All Recorded Slips'}"`,
+      `"Date Filter Period:","${getReportDateFilterLabel()}"`,
       `"Generated Date:","${new Date().toLocaleDateString('en-US')}"`,
       `"Audited By:","${currentUser.name} (${currentUser.role})"`,
       `"Total Slips Evaluated:","${withdrawalReportSummary.totalSlips}"`,
@@ -1554,6 +1624,12 @@ export default function Withdrawals({
                     <span className="text-[10px] font-mono font-bold bg-[#FAF9F5] border border-[#EBE6DD] px-2.5 py-0.5 rounded-full text-[#8C7A6B] uppercase">
                       Highest to Lowest Qty Disbursed
                     </span>
+                    {reportDateRange !== 'all' && (
+                      <span className="text-[10px] font-mono font-bold bg-[#3E312C]/10 border border-[#3E312C]/20 text-[#3E312C] px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                        <Calendar className="h-3 w-3 text-[#3E312C]" />
+                        {getReportDateFilterLabel()}
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-[#8C7A6B] mt-0.5">
                     Consolidated valuation of all inventory items withdrawn across hotel departments, automatically sorted by highest to lowest quantity disbursed.
@@ -1707,19 +1783,87 @@ export default function Withdrawals({
                       <option value="pending">Pending & Approved</option>
                     </select>
 
-                    {/* Timeframe Filter */}
-                    <select
-                      value={reportDateRange}
-                      onChange={(e) => setReportDateRange(e.target.value as any)}
-                      className="bg-white border border-[#EBE6DD] text-xs text-[#3E312C] rounded-xl px-3 py-2 focus:outline-hidden focus:border-[#3E312C] cursor-pointer"
-                    >
-                      <option value="all">All Time</option>
-                      <option value="this_month">This Month</option>
-                      <option value="30days">Last 30 Days</option>
-                      <option value="7days">Last 7 Days</option>
-                    </select>
+                    {/* Date Filter Selector */}
+                    <div className="flex items-center gap-1.5 bg-white border border-[#EBE6DD] rounded-xl px-2.5 py-1.5 shadow-2xs">
+                      <Calendar className="h-3.5 w-3.5 text-[#8C7A6B] shrink-0" />
+                      <select
+                        id="report-date-range-select"
+                        value={reportDateRange}
+                        onChange={(e) => {
+                          const val = e.target.value as any;
+                          setReportDateRange(val);
+                          if (val === 'custom' && !reportStartDate && !reportEndDate) {
+                            const now = new Date();
+                            const y = now.getFullYear();
+                            const m = String(now.getMonth() + 1).padStart(2, '0');
+                            const d = String(now.getDate()).padStart(2, '0');
+                            setReportStartDate(`${y}-${m}-01`);
+                            setReportEndDate(`${y}-${m}-${d}`);
+                          }
+                        }}
+                        className="bg-transparent text-xs text-[#3E312C] font-medium focus:outline-hidden cursor-pointer"
+                      >
+                        <option value="all">All Time (All Dates)</option>
+                        <option value="today">Today</option>
+                        <option value="yesterday">Yesterday</option>
+                        <option value="this_week">This Week</option>
+                        <option value="this_month">This Month</option>
+                        <option value="last_month">Last Month</option>
+                        <option value="this_year">This Year</option>
+                        <option value="7days">Last 7 Days</option>
+                        <option value="30days">Last 30 Days</option>
+                        <option value="custom">Custom Date Range...</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
+
+                {/* Custom Date Range Picker bar */}
+                {reportDateRange === 'custom' && (
+                  <div className="flex flex-wrap items-center justify-between gap-2.5 p-2.5 bg-white border border-[#EBE6DD] rounded-xl animate-in fade-in duration-150" id="report-custom-date-container">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-bold text-[#3E312C] flex items-center gap-1.5">
+                        <Calendar className="h-3.5 w-3.5 text-[#8C7A6B]" />
+                        <span>Custom Filter:</span>
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <label htmlFor="report-start-date" className="text-[11px] text-[#8C7A6B] font-semibold">From:</label>
+                        <input
+                          id="report-start-date"
+                          type="date"
+                          value={reportStartDate}
+                          onChange={(e) => setReportStartDate(e.target.value)}
+                          className="bg-[#FAF9F5] border border-[#EBE6DD] rounded-lg px-2.5 py-1 text-xs text-[#3E312C] focus:outline-hidden focus:border-[#3E312C]"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <label htmlFor="report-end-date" className="text-[11px] text-[#8C7A6B] font-semibold">To:</label>
+                        <input
+                          id="report-end-date"
+                          type="date"
+                          value={reportEndDate}
+                          onChange={(e) => setReportEndDate(e.target.value)}
+                          className="bg-[#FAF9F5] border border-[#EBE6DD] rounded-lg px-2.5 py-1 text-xs text-[#3E312C] focus:outline-hidden focus:border-[#3E312C]"
+                        />
+                      </div>
+                      {(reportStartDate || reportEndDate) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReportStartDate('');
+                            setReportEndDate('');
+                          }}
+                          className="text-xs text-rose-600 hover:text-rose-700 hover:underline px-1.5 py-1 font-medium cursor-pointer"
+                        >
+                          Clear Dates
+                        </button>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-[#8C7A6B] font-mono">
+                      {reportWithdrawals.length} slip{reportWithdrawals.length !== 1 ? 's' : ''} in selected period
+                    </div>
+                  </div>
+                )}
 
                 {/* View Mode Switcher */}
                 <div className="flex items-center justify-between pt-1 border-t border-[#EBE6DD]/60 flex-wrap gap-2">
@@ -1830,7 +1974,7 @@ export default function Withdrawals({
                               <AlertCircle className="h-8 w-8 mx-auto text-[#8C7A6B]/50 mb-2" />
                               <p className="font-semibold text-sm">No withdrawn items found</p>
                               <p className="text-xs text-[#8C7A6B]/80 mt-0.5">
-                                Try adjusting your search query, department selection, or status filters.
+                                Try adjusting your search query, date filter, department selection, or status filters.
                               </p>
                             </td>
                           </tr>
