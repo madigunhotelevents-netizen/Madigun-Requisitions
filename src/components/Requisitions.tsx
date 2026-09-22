@@ -66,6 +66,8 @@ interface SignaturePadModalProps {
   subtitle: string;
   signerName: string;
   signerRole: string;
+  rememberLabel?: string;
+  confirmLabel?: string;
 }
 
 // Helper to compress and optimize signature canvas to a crisp, lightweight image
@@ -96,7 +98,9 @@ function SignaturePadModal({
   title,
   subtitle,
   signerName,
-  signerRole
+  signerRole,
+  rememberLabel,
+  confirmLabel
 }: SignaturePadModalProps) {
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -356,7 +360,7 @@ function SignaturePadModal({
               className="rounded border-[#E6E4DD] text-[#3E312C] focus:ring-[#3E312C] cursor-pointer"
             />
             <label htmlFor="save-default-sig" className="text-xs text-[#3E312C] font-medium cursor-pointer">
-              Remember & save this signature for future PR approvals
+              {rememberLabel || "Remember & save this signature for future PR signing"}
             </label>
           </div>
 
@@ -392,7 +396,7 @@ function SignaturePadModal({
             ) : (
               <>
                 <Check className="h-4 w-4 text-emerald-400" />
-                <span>Confirm & Embed Signature</span>
+                <span>{confirmLabel || "Confirm & Embed Signature"}</span>
               </>
             )}
           </button>
@@ -429,14 +433,35 @@ export default function Requisitions({
   const [purgingReqId, setPurgingReqId] = useState<string | null>(null);
   const [subTab, setSubTab] = useState<'active' | 'deleted'>('active');
 
+  // Helper for human-friendly preparer role display
+  const getPreparerRoleLabel = (role?: string) => {
+    switch (role) {
+      case 'rooms_event_officer':
+        return 'Rooms & Events Officer';
+      case 'purchaser':
+        return 'Hotel Purchaser';
+      case 'admin':
+        return 'Property Custodian / Admin';
+      case 'managing_director':
+        return 'Hotel Managing Director';
+      case 'kitchen':
+        return 'Kitchen Staff';
+      default:
+        return 'Requisition Preparer';
+    }
+  };
+
   // Signature Modal State
   const [signatureModal, setSignatureModal] = useState<{
     isOpen: boolean;
-    reqId: string;
-    reqNumber: string;
-    action: 'check' | 'approve';
+    reqId?: string;
+    reqNumber?: string;
+    action: 'draft' | 'submit' | 'submit_existing' | 'check' | 'approve';
     title: string;
     subtitle: string;
+    confirmLabel?: string;
+    rememberLabel?: string;
+    draftData?: Omit<Requisition, 'id' | 'requisitionNumber' | 'createdBy' | 'createdByName' | 'createdAt' | 'totalCost'>;
   } | null>(null);
 
   // Print Requisition
@@ -1288,19 +1313,25 @@ export default function Requisitions({
       return;
     }
 
-    onCreateRequisition({
-      items: compiledDraftItems,
-      purpose: purpose.trim() || 'Untitled Draft Requisition',
-      requestingDept,
-      allocatedLocation: allocatedLocation.trim(),
-      priority,
-      status: 'draft',
-      notes: notes.trim(),
-      quotations: draftQuotations
+    setSignatureModal({
+      isOpen: true,
+      action: 'draft',
+      reqNumber: 'New Draft PR',
+      title: 'Requisition Preparer Digital Signature',
+      subtitle: `Sign below as preparer to authorize and save this purchase requisition draft (${compiledDraftItems.length} item${compiledDraftItems.length !== 1 ? 's' : ''}, est. ₱${draftTotalCost.toFixed(2)}).`,
+      confirmLabel: 'Confirm & Save Draft',
+      rememberLabel: 'Remember & save this signature for future PR drafting',
+      draftData: {
+        items: compiledDraftItems,
+        purpose: purpose.trim() || 'Untitled Draft Requisition',
+        requestingDept,
+        allocatedLocation: allocatedLocation.trim(),
+        priority,
+        status: 'draft',
+        notes: notes.trim(),
+        quotations: draftQuotations
+      }
     });
-
-    handleClearLocalDraft();
-    setIsCreating(false);
   };
 
   // Search bar state for creating requisitions
@@ -1447,20 +1478,25 @@ export default function Requisitions({
       return;
     }
 
-    onCreateRequisition({
-      items: compiledDraftItems,
-      purpose: purpose.trim(),
-      requestingDept,
-      allocatedLocation: allocatedLocation.trim(),
-      priority,
-      status: 'pending',
-      notes: notes.trim(),
-      quotations: draftQuotations
+    setSignatureModal({
+      isOpen: true,
+      action: 'submit',
+      reqNumber: 'New PR',
+      title: 'Requisition Preparer Digital Signature',
+      subtitle: `Sign below as preparer to authorize and submit this purchase requisition for verification and approval (${compiledDraftItems.length} item${compiledDraftItems.length !== 1 ? 's' : ''}, Total: ₱${draftTotalCost.toFixed(2)}).`,
+      confirmLabel: 'Confirm Signature & Submit PR',
+      rememberLabel: 'Remember & save this signature for future PR drafting',
+      draftData: {
+        items: compiledDraftItems,
+        purpose: purpose.trim(),
+        requestingDept,
+        allocatedLocation: allocatedLocation.trim(),
+        priority,
+        status: 'pending',
+        notes: notes.trim(),
+        quotations: draftQuotations
+      }
     });
-
-    // Reset Form & Clear Local Draft Storage
-    handleClearLocalDraft();
-    setIsCreating(false);
   };
 
   // Filter inventory for creation form search input with tab section filtering
@@ -3120,15 +3156,36 @@ export default function Requisitions({
                                 <div className="space-y-1">
                                   <p className="text-[10px] font-mono text-[#8C7A6B] uppercase font-bold tracking-wider leading-none">Workflow Log History</p>
                                   <div className="text-[#3E312C] space-y-1.5 text-xs mt-3">
-                                    <p>• Drafted by: <span className="font-semibold text-[#3E312C]">{req.createdByName}</span></p>
+                                    <p className="flex items-center justify-between flex-wrap gap-1">
+                                      <span>• Drafted by: <span className="font-semibold text-[#3E312C]">{req.createdByName}</span></span>
+                                      {req.preparerSignature && (
+                                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                                          <FileCheck className="h-3 w-3 text-emerald-600" /> Signed by Preparer
+                                        </span>
+                                      )}
+                                    </p>
                                     {req.checkedBy && (
-                                      <p className="text-emerald-700 font-semibold flex items-center gap-1">
-                                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
-                                        <span>Checked & Verified by Purchaser: <span className="font-bold">{req.checkedByName}</span> {req.checkedAt && `on ${new Date(req.checkedAt).toLocaleString()}`}</span>
+                                      <p className="text-emerald-700 font-semibold flex items-center justify-between flex-wrap gap-1">
+                                        <span className="flex items-center gap-1">
+                                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
+                                          <span>Checked & Verified by Purchaser: <span className="font-bold">{req.checkedByName}</span> {req.checkedAt && `on ${new Date(req.checkedAt).toLocaleString()}`}</span>
+                                        </span>
+                                        {req.checkedSignature && (
+                                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                                            <FileCheck className="h-3 w-3 text-emerald-600" /> Signed by Purchaser
+                                          </span>
+                                        )}
                                       </p>
                                     )}
                                     {req.approvedBy && (
-                                      <p className="text-[#3E312C]">• Approved by: <span className="font-semibold">{req.approvedByName}</span></p>
+                                      <p className="text-[#3E312C] flex items-center justify-between flex-wrap gap-1">
+                                        <span>• Approved by: <span className="font-semibold">{req.approvedByName}</span></span>
+                                        {req.approvedSignature && (
+                                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                                            <FileCheck className="h-3 w-3 text-emerald-600" /> Signed by Approver
+                                          </span>
+                                        )}
+                                      </p>
                                     )}
                                     {req.receivedAt && (
                                       <div className="space-y-1 text-xs">
@@ -3153,6 +3210,62 @@ export default function Requisitions({
                                     {req.rejectedAt && (
                                       <p className="text-[#A65D46] font-semibold">• Rejected by: {req.rejectedByName}</p>
                                     )}
+                                  </div>
+
+                                  {/* 3-Party Digital Signatures & Authorization Block */}
+                                  <div className="mt-4 pt-3 border-t border-[#F0EFE9]">
+                                    <p className="text-[10px] font-mono text-[#8C7A6B] uppercase font-bold tracking-wider mb-2">
+                                      PR Digital Signatures & Authorization
+                                    </p>
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                      {/* Box 1: Preparer */}
+                                      <div className="p-2 bg-[#FAF9F5] border border-[#EBE6DD] rounded-xl text-center space-y-1 flex flex-col justify-between min-h-[92px]">
+                                        <div>
+                                          <p className="text-[9px] font-bold uppercase tracking-wider text-[#8C7A6B]">1. Prepared By</p>
+                                          <p className="text-xs font-bold text-[#3E312C] truncate" title={req.createdByName}>{req.createdByName}</p>
+                                        </div>
+                                        <div className="h-8 flex items-center justify-center">
+                                          {req.preparerSignature ? (
+                                            <img src={req.preparerSignature} alt="Preparer Signature" className="h-7 max-w-[110px] object-contain" />
+                                          ) : (
+                                            <span className="text-[10px] text-[#8C7A6B] italic font-mono">No signature</span>
+                                          )}
+                                        </div>
+                                        <p className="text-[9px] text-[#8C7A6B]">{new Date(req.createdAt).toLocaleDateString()}</p>
+                                      </div>
+
+                                      {/* Box 2: Purchaser Verification */}
+                                      <div className="p-2 bg-[#FAF9F5] border border-[#EBE6DD] rounded-xl text-center space-y-1 flex flex-col justify-between min-h-[92px]">
+                                        <div>
+                                          <p className="text-[9px] font-bold uppercase tracking-wider text-[#8C7A6B]">2. Checked By</p>
+                                          <p className="text-xs font-bold text-[#3E312C] truncate" title={req.checkedByName || 'Pending'}>{req.checkedByName || 'Pending Purchaser'}</p>
+                                        </div>
+                                        <div className="h-8 flex items-center justify-center">
+                                          {req.checkedSignature ? (
+                                            <img src={req.checkedSignature} alt="Purchaser Signature" className="h-7 max-w-[110px] object-contain" />
+                                          ) : (
+                                            <span className="text-[10px] text-[#8C7A6B] italic font-mono">{req.checkedBy ? 'Verified' : 'Pending Verification'}</span>
+                                          )}
+                                        </div>
+                                        <p className="text-[9px] text-[#8C7A6B]">{req.checkedAt ? new Date(req.checkedAt).toLocaleDateString() : '—'}</p>
+                                      </div>
+
+                                      {/* Box 3: Executive Approver */}
+                                      <div className="p-2 bg-[#FAF9F5] border border-[#EBE6DD] rounded-xl text-center space-y-1 flex flex-col justify-between min-h-[92px]">
+                                        <div>
+                                          <p className="text-[9px] font-bold uppercase tracking-wider text-[#8C7A6B]">3. Approved By</p>
+                                          <p className="text-xs font-bold text-[#3E312C] truncate" title={req.approvedByName || 'Rome Garcia'}>{req.approvedByName || (req.status === 'approved' ? 'Rome Garcia' : 'Pending Approver')}</p>
+                                        </div>
+                                        <div className="h-8 flex items-center justify-center">
+                                          {req.approvedSignature ? (
+                                            <img src={req.approvedSignature} alt="Approver Signature" className="h-7 max-w-[110px] object-contain" />
+                                          ) : (
+                                            <span className="text-[10px] text-[#8C7A6B] italic font-mono">{req.status === 'approved' ? 'Approved' : 'Pending Approval'}</span>
+                                          )}
+                                        </div>
+                                        <p className="text-[9px] text-[#8C7A6B]">{req.approvedAt ? new Date(req.approvedAt).toLocaleDateString() : '—'}</p>
+                                      </div>
+                                    </div>
                                   </div>
                                 </div>
 
@@ -3212,7 +3325,16 @@ export default function Requisitions({
                                         type="button"
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          onUpdateStatus(req.id, 'pending');
+                                          setSignatureModal({
+                                            isOpen: true,
+                                            reqId: req.id,
+                                            reqNumber: req.requisitionNumber,
+                                            action: 'submit_existing',
+                                            title: 'Requisition Preparer Digital Signature',
+                                            subtitle: `Sign below as preparer to submit Requisition ${req.requisitionNumber} for purchaser verification and executive approval (Total: ₱${req.totalCost.toFixed(2)}).`,
+                                            confirmLabel: 'Confirm Signature & Submit PR',
+                                            rememberLabel: 'Remember & save this signature for future PR drafting'
+                                          });
                                         }}
                                         className="flex items-center gap-1.5 bg-[#3E312C] hover:bg-[#2C211F] text-white px-4 py-2 rounded-xl text-xs font-bold cursor-pointer shadow-2xs transition-all"
                                         title="Submit this draft requisition for verification and approval"
@@ -3260,9 +3382,16 @@ export default function Requisitions({
                                             type="button"
                                             onClick={(e) => {
                                               e.stopPropagation();
-                                              if (onCheckRequisition) {
-                                                onCheckRequisition(req.id);
-                                              }
+                                              setSignatureModal({
+                                                isOpen: true,
+                                                reqId: req.id,
+                                                reqNumber: req.requisitionNumber,
+                                                action: 'check',
+                                                title: 'Purchaser PR Verification & Digital Signature',
+                                                subtitle: `Sign below to verify specifications and pricing for Requisition ${req.requisitionNumber} (Total: ₱${req.totalCost.toFixed(2)})`,
+                                                confirmLabel: 'Confirm Signature & Verify PR',
+                                                rememberLabel: 'Remember & save this signature for future PR verifications'
+                                              });
                                             }}
                                             className="flex items-center gap-1.5 bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2 rounded-full text-xs font-bold cursor-pointer shadow-2xs transition-all mr-1"
                                           >
@@ -3287,7 +3416,9 @@ export default function Requisitions({
                                                   reqNumber: req.requisitionNumber,
                                                   action: 'approve',
                                                   title: 'Executive PR Approval & Digital Signature',
-                                                  subtitle: `Sign below to approve Requisition ${req.requisitionNumber} (Total: ₱${req.totalCost.toFixed(2)})`
+                                                  subtitle: `Sign below to approve Requisition ${req.requisitionNumber} (Total: ₱${req.totalCost.toFixed(2)})`,
+                                                  confirmLabel: 'Confirm Signature & Approve PR',
+                                                  rememberLabel: 'Remember & save this signature for future PR approvals'
                                                 });
                                               }}
                                               className="flex items-center gap-1 bg-[#3E312C] hover:bg-[#2C211F] text-white px-4 py-2 rounded-full text-xs font-semibold cursor-pointer shadow-2xs transition-all"
@@ -3541,16 +3672,31 @@ export default function Requisitions({
                 : 'KITCHEN STAFF';
               return (
                 <div style={{ marginTop: '50px', display: 'flex', justifyContent: 'space-between' }}>
-                  <div style={{ width: '30%', borderTop: '1px solid #111', paddingTop: '8px', textAlign: 'center' }}>
+                  <div style={{ width: '30%', borderTop: '1px solid #111', paddingTop: '8px', textAlign: 'center', position: 'relative' }}>
+                    {activePrintReq.preparerSignature ? (
+                      <img src={activePrintReq.preparerSignature} alt="Preparer Signature" style={{ height: '36px', maxWidth: '120px', display: 'block', margin: '0 auto 4px auto', objectFit: 'contain' }} />
+                    ) : (
+                      <div style={{ height: '36px' }} />
+                    )}
                     <p style={{ margin: 0, fontWeight: 'bold', fontSize: '12px' }}>{activePrintReq.createdByName}</p>
                     <p style={{ margin: '2px 0 0 0', fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>PREPARER: {preparerRoleLabel}</p>
                   </div>
-                  <div style={{ width: '30%', borderTop: '1px solid #111', paddingTop: '8px', textAlign: 'center' }}>
+                  <div style={{ width: '30%', borderTop: '1px solid #111', paddingTop: '8px', textAlign: 'center', position: 'relative' }}>
+                    {activePrintReq.checkedSignature ? (
+                      <img src={activePrintReq.checkedSignature} alt="Purchaser Signature" style={{ height: '36px', maxWidth: '120px', display: 'block', margin: '0 auto 4px auto', objectFit: 'contain' }} />
+                    ) : (
+                      <div style={{ height: '36px' }} />
+                    )}
                     <p style={{ margin: 0, fontWeight: 'bold', fontSize: '12px' }}>{activePrintReq.checkedByName || '___________________________'}</p>
                     <p style={{ margin: '2px 0 0 0', fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>CHECK BY: PURCHASER</p>
                   </div>
-                  <div style={{ width: '30%', borderTop: '1px solid #111', paddingTop: '8px', textAlign: 'center' }}>
-                    <p style={{ margin: 0, fontWeight: 'bold', fontSize: '12px' }}>Rome Garcia</p>
+                  <div style={{ width: '30%', borderTop: '1px solid #111', paddingTop: '8px', textAlign: 'center', position: 'relative' }}>
+                    {activePrintReq.approvedSignature ? (
+                      <img src={activePrintReq.approvedSignature} alt="Approver Signature" style={{ height: '36px', maxWidth: '120px', display: 'block', margin: '0 auto 4px auto', objectFit: 'contain' }} />
+                    ) : (
+                      <div style={{ height: '36px' }} />
+                    )}
+                    <p style={{ margin: 0, fontWeight: 'bold', fontSize: '12px' }}>{activePrintReq.approvedByName || 'Rome Garcia'}</p>
                     <p style={{ margin: '2px 0 0 0', fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>HOTEL MANAGING DIRECTOR</p>
                   </div>
                 </div>
@@ -3983,10 +4129,14 @@ export default function Requisitions({
           isOpen={signatureModal.isOpen}
           title={signatureModal.title}
           subtitle={signatureModal.subtitle}
+          confirmLabel={signatureModal.confirmLabel}
+          rememberLabel={signatureModal.rememberLabel}
           signerName={currentUser.name}
           signerRole={
-            signatureModal.action === 'check' 
-              ? 'Purchaser / Auditor' 
+            (signatureModal.action === 'draft' || signatureModal.action === 'submit' || signatureModal.action === 'submit_existing')
+              ? getPreparerRoleLabel(currentUser.role)
+              : signatureModal.action === 'check' 
+              ? (currentUser.role === 'purchaser' ? 'Hotel Purchaser / Auditor' : 'Authorized Auditor')
               : currentUser.role === 'managing_director' 
               ? 'Hotel Managing Director' 
               : 'Authorized Approver'
@@ -3995,12 +4145,23 @@ export default function Requisitions({
           onSave={async (signatureDataUrl) => {
             const action = signatureModal.action;
             const reqId = signatureModal.reqId;
+            const draftData = signatureModal.draftData;
             setSignatureModal(null);
-            if (action === 'check') {
+
+            if ((action === 'draft' || action === 'submit') && draftData) {
+              onCreateRequisition({
+                ...draftData,
+                preparerSignature: signatureDataUrl
+              });
+              handleClearLocalDraft();
+              setIsCreating(false);
+            } else if (action === 'submit_existing' && reqId) {
+              await onUpdateStatus(reqId, 'pending', signatureDataUrl);
+            } else if (action === 'check' && reqId) {
               if (onCheckRequisition) {
                 await onCheckRequisition(reqId, signatureDataUrl);
               }
-            } else if (action === 'approve') {
+            } else if (action === 'approve' && reqId) {
               await onUpdateStatus(reqId, 'approved', signatureDataUrl);
             }
           }}

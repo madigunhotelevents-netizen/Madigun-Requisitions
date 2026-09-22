@@ -877,7 +877,13 @@ export default function App() {
     const statusMetadata: Partial<Requisition> = {};
     const timestamp = new Date().toISOString();
 
-    if (newStatus === 'approved') {
+    if (newStatus === 'pending') {
+      if (signatureDataUrl) {
+        statusMetadata.preparerSignature = signatureDataUrl;
+      }
+      logAction = 'Submitted Requisition';
+      logDetails = `Submitted purchase requisition ${targetReq.requisitionNumber} for verification and approval.`;
+    } else if (newStatus === 'approved') {
       statusMetadata.approvedBy = currentUser.id;
       statusMetadata.approvedByName = currentUser.name;
       statusMetadata.approvedAt = timestamp;
